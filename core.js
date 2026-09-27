@@ -277,6 +277,10 @@
       u.qids.forEach(function (id) { planIds[id] = 1; });
       acc += u.min;
     }
+    // N-SEC-3：兜底——没有任何题可练的组不进清单（写译组 qids 本来就为空，保留）
+    items = items.filter(function (it) {
+      return (it.qids && it.qids.length) || it.type === 'writing' || it.type === 'translation';
+    });
     return { date: dateStr, v: CORE.PLAN_VERSION, items: items };
   };
   function C_findQno(banks, qid) {
@@ -340,7 +344,7 @@
   CORE.STORAGE_KEY = 'cet6_p1_state_v1';
   // 多账号：每个手机号一个独立存档，数据保存在各自设备本地
   CORE.stateKey = function (phone) { return CORE.STORAGE_KEY + '_' + phone; };
-  CORE.loadState = function (storage, key) {
+  CORE.loadState = function (storage, key, banks) {
     try {
       var raw = storage.getItem(key || CORE.STORAGE_KEY);
       if (!raw) return CORE.newState();
@@ -356,7 +360,7 @@
           if (wb.iv === undefined) wb.iv = CORE.INTERVALS[Math.min(wb.box || 0, CORE.INTERVALS.length - 1)];
         });
       }
-      return CORE.normalizeState(s);
+      return CORE.normalizeState(s, banks);
     } catch (e) { return CORE.newState(); }
   };
   CORE.newState = function () {
@@ -431,33 +435,56 @@
   /* 为什么需要：state 里几乎每个字段最终都会进 innerHTML（统计卡、错题行、热力图 title…）。
      只要存档里混进一个字符串型数字，注入面就打开了。任何来源的 state（被篡改的
      localStorage、旧备份、手改的 JSON）都先过一遍这里：只保留已知字段、已知类型，
-     数字一律 Number()、字符串一律限长、日期一律校验格式，从根上掐掉脏数据。
+     数字一律 Number()+clamp、字符串一律限长、日期一律校验格式与真实日历，从根上掐掉脏数据。
      注意 plan：这里是"结构校验后保留"，不是无条件丢弃——plan 里带着今日清单的
      done 状态、断点续做的 draft 与计时器剩余秒数，每次载入都清空会让刷新即丢进度。
-     结构不合法（items 不是数组等）或日期/版本不符时置 null，交给 ensurePlan 重算。 */
-  CORE.normalizeState = function (s) {
+     结构不合法（items 不是数组等）或日期/版本不符时置 null，交给 ensurePlan 重算。
+     N-SEC-3：第二个参数 banks 可选传入题库时，会同时过滤 plan.items[].qids 里题库已不存在的
+     幽灵 qid，并删掉过滤后无题可做的组（否则 0 题组会让今日清单永远无法完成）；
+     不传 banks（题库未加载全）时不删，与 index.html 侧 pruneGhosts 的口径一致。
+     N-UI-3：judged/rightCount/answers/timeSpentSec 一并保留，使"已判分"能跨刷新存活。 */
+  CORE.normalizeState = function (s, banks) {
     var st = CORE.newState();
     st.version = 1;
     var num = function (v) { v = Number(v); return isFinite(v) ? v : 0; };
+    // N-SEC-7：数字一并 clamp 到合理区间（脏存档里的 -100 / 1e9 会扭曲统计、进度条与排序）
+    var clamp = function (v, lo, hi) { var x = num(v); if (x < lo) x = lo; if (x > hi) x = hi; return x; };
     var isObj = function (o) { return !!o && typeof o === 'object' && !Array.isArray(o); };
     var str = function (v, n) { return String(v == null ? '' : v).slice(0, n); };
+    // N-SEC-7：日期不只校验格式，还回读日历——2026-13-45 / 2026-02-30 这类"格式合法"的假日期会被拒
+    var isDate = function (v) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+      var p = String(v).split('-').map(Number);
+      var d = new Date(p[0], p[1] - 1, p[2]);
+      return d.getFullYear() === p[0] && d.getMonth() === p[1] - 1 && d.getDate() === p[2];
+    };
+    var dateOr = function (v, fb) { return isDate(v) ? v : fb; };
     if (!isObj(s)) return st; // null / 数组 / 字符串存档：直接给一份全新状态，不抛异常
+    // N-SEC-3：题库 id 集合（只有调用方传入完整题库时才用于过滤幽灵 qid——
+    // 题库没加载全时宁可不删，与 index.html 侧 pruneGhosts 的 banksComplete 口径一致）
+    var known = null;
+    if (Array.isArray(banks) && banks.length) {
+      known = {};
+      banks.forEach(function (b) {
+        ((b && b.questions) || []).forEach(function (q) { if (q && q.id) known[q.id] = 1; });
+      });
+    }
     // history: 只保留对象值，所有数字字段强制 Number()
     if (isObj(s.history)) {
       Object.keys(s.history).forEach(function (d) {
         var h = s.history[d]; if (!isObj(h)) return;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; // 日期键校验
-        st.history[d] = { minutes: num(h.minutes), done: !!h.done, floor: !!h.floor,
-          qCount: num(h.qCount), right: num(h.right), timed: num(h.timed),
-          timedWithin: num(h.timedWithin), timedSec: num(h.timedSec) };
+        if (!isDate(d)) return; // 日期键校验
+        st.history[d] = { minutes: clamp(h.minutes, 0, 1e5), done: !!h.done, floor: !!h.floor,
+          qCount: clamp(h.qCount, 0, 1e7), right: clamp(h.right, 0, 1e7), timed: clamp(h.timed, 0, 1e7),
+          timedWithin: clamp(h.timedWithin, 0, 1e7), timedSec: clamp(h.timedSec, 0, 1e7) };
       });
     }
     // papers: 数字字段强制 Number，lastAnswer 限长
     if (isObj(s.papers)) {
       Object.keys(s.papers).forEach(function (q) {
         var p = s.papers[q]; if (!isObj(p)) return;
-        st.papers[q] = { seen: num(p.seen), right: num(p.right), wrong: num(p.wrong),
-          lastAt: str(p.lastAt, 10), lastResult: p.lastResult === 'right' ? 'right' : 'wrong',
+        st.papers[q] = { seen: clamp(p.seen, 0, 1e7), right: clamp(p.right, 0, 1e7), wrong: clamp(p.wrong, 0, 1e7),
+          lastAt: dateOr(p.lastAt, ''), lastResult: p.lastResult === 'right' ? 'right' : 'wrong',
           lastAnswer: p.lastAnswer == null ? null : String(p.lastAnswer).slice(0, 40) };
       });
     }
@@ -465,10 +492,11 @@
     if (isObj(s.wrongbook)) {
       Object.keys(s.wrongbook).forEach(function (q) {
         var w = s.wrongbook[q]; if (!isObj(w)) return;
-        st.wrongbook[q] = { addedAt: str(w.addedAt, 10), box: num(w.box), wrongCount: num(w.wrongCount),
-          due: /^\d{4}-\d{2}-\d{2}$/.test(w.due) ? w.due : CORE.todayStr(),
-          ease: Math.min(2.8, Math.max(1.3, num(w.ease) || 2.5)), iv: Math.max(1, num(w.iv) || 1),
-          streak: num(w.streak) };
+        st.wrongbook[q] = { addedAt: dateOr(w.addedAt, CORE.todayStr()), box: clamp(w.box, 0, 100),
+          wrongCount: clamp(w.wrongCount, 0, 1e6),
+          due: dateOr(w.due, CORE.todayStr()),
+          ease: Math.min(2.8, Math.max(1.3, num(w.ease) || 2.5)), iv: clamp(num(w.iv) || 1, 1, 3650),
+          streak: clamp(w.streak, 0, 1e6) };
       });
     }
     // essays: 只保留字符串，限长 20000
@@ -476,7 +504,7 @@
     ['writing', 'translation'].forEach(function (k) {
       var e = s.essays && s.essays[k];
       if (e && typeof e === 'object' && typeof e.text === 'string')
-        st.essays[k] = { lastAt: str(e.lastAt, 10), text: e.text.slice(0, 20000) };
+        st.essays[k] = { lastAt: dateOr(e.lastAt, ''), text: e.text.slice(0, 20000) };
     });
     // hl: 只保留 pid->字符串数组
     st.hl = {};
@@ -493,14 +521,24 @@
       s.plan.items.forEach(function (it) {
         if (!isObj(it)) return;
         var qids = Array.isArray(it.qids) ? it.qids.filter(function (x) { return typeof x === 'string' && x.length <= 64; }).slice(0, 60) : [];
-        var o = { key: str(it.key, 120), type: str(it.type, 24), qids: qids,
+        // N-SEC-3：与 wrongbook 同口径过滤幽灵 qid（旧备份/跨版本题库残留的题号）
+        if (known) qids = qids.filter(function (id) { return known[id]; });
+        var type = str(it.type, 24);
+        var isEssay = type === 'writing' || type === 'translation';
+        // N-SEC-3：过滤后无题可做的组直接删除——否则渲染出"0 题组"、提交按钮永远禁用，今日清单死锁。
+        // 写译组本来就没有 qids（整组就一个题面），不能当空组丢掉。
+        if (known && !qids.length && !isEssay) return;
+        var o = { key: str(it.key, 120), type: type, qids: qids,
           paperId: str(it.paperId, 24), label: str(it.label, 120),
-          done: !!it.done, minutes: num(it.minutes) };
+          done: !!it.done, minutes: clamp(it.minutes, 0, 1e5) };
         if (it.review) o.review = true;
         if (it.extra) o.extra = true;
         if (it.isWrong) o.isWrong = true;
         if (it.isPoint) o.isPoint = true;
-        if (it.timerLeft != null) o.timerLeft = num(it.timerLeft);
+        if (it.timerLeft != null) o.timerLeft = clamp(it.timerLeft, 0, 1e6);
+        // 考场用时（判分/写译完成时记在条目上）：保留才能让刷新后的结果卡显示"用时/是否达标"
+        if (it.timeSpentSec != null) o.timeSpentSec = clamp(it.timeSpentSec, 0, 1e6);
+        if (it.withinTime != null) o.withinTime = !!it.withinTime;
         if (isObj(it.draft)) { // 断点续做草稿：{qid: 'A'} 形状，逐项限长
           var dr = {};
           Object.keys(it.draft).slice(0, 60).forEach(function (k) {
@@ -509,11 +547,25 @@
           });
           if (Object.keys(dr).length) o.draft = dr;
         }
+        // N-UI-3：已判分状态与判分结果（你选了哪项、答对几题）随 plan 持久化，
+        // 刷新后恢复判分结果视图，而不是退回"可再次提交"状态导致重复判分。
+        if (it.judged) {
+          o.judged = true;
+          o.rightCount = clamp(it.rightCount, 0, 1e3);
+          var ans = {};
+          if (isObj(it.answers)) {
+            Object.keys(it.answers).slice(0, 60).forEach(function (k) {
+              var av = it.answers[k];
+              if (typeof av === 'string' && k.length <= 64) ans[k.slice(0, 64)] = av.slice(0, 8);
+            });
+          }
+          o.answers = ans;
+        }
         items.push(o);
       });
-      st.plan = { date: /^\d{4}-\d{2}-\d{2}$/.test(s.plan.date) ? s.plan.date : '', v: num(s.plan.v), items: items };
+      st.plan = { date: dateOr(s.plan.date, ''), v: clamp(s.plan.v, 0, 1e6), items: items };
     }
-    st.lastBackup = typeof s.lastBackup === 'string' ? s.lastBackup.slice(0, 10) : '';
+    st.lastBackup = dateOr(s.lastBackup, '');
     return st;
   };
 
