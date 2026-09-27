@@ -113,7 +113,9 @@
   CORE.dueWrongIds = function (state, dateStr) {
     var out = [];
     Object.keys(state.wrongbook).forEach(function (qid) {
-      if (CORE.dayDiff(state.wrongbook[qid].due, dateStr) >= 0) out.push(qid);
+      var wb = state.wrongbook[qid];
+      if (!wb) return; // 脏存档兜底：值为空则视为不在库
+      if (CORE.dayDiff(wb.due, dateStr) >= 0) out.push(qid);
     });
     return out;
   };
@@ -121,7 +123,7 @@
   // 智能复习队列：到期错题按（逾期天数 > 错次 > ease 低）排序，越薄弱越靠前
   CORE.reviewQueue = function (state, banks, dateStr, limit) {
     var qids = [];
-    Object.keys(state.wrongbook).forEach(function (qid) { qids.push(qid); });
+    Object.keys(state.wrongbook).forEach(function (qid) { if (state.wrongbook[qid]) qids.push(qid); });
     qids.sort(function (a, b) {
       var wa = state.wrongbook[a], wbb = state.wrongbook[b];
       var oa = CORE.dayDiff(wa.due, dateStr), ob = CORE.dayDiff(wbb.due, dateStr); // 逾期天数（正=已逾期）
@@ -138,15 +140,17 @@
   };
   // 错题本总览统计
   CORE.wrongSummary = function (state, dateStr) {
-    var ids = Object.keys(state.wrongbook), due = 0, overdue = 0, maxOver = 0, ivSum = 0;
+    var ids = Object.keys(state.wrongbook), due = 0, overdue = 0, maxOver = 0, ivSum = 0, n = 0;
     ids.forEach(function (qid) {
       var wb = state.wrongbook[qid];
+      if (!wb) return;
+      n++;
       var od = CORE.dayDiff(wb.due, dateStr); // 逾期天数（正=已逾期）
       if (od >= 0) due++;
       if (od > 0) { overdue++; if (od > maxOver) maxOver = od; }
       ivSum += (wb.iv || 1);
     });
-    return { total: ids.length, due: due, overdue: overdue, maxOverdue: maxOver, avgIv: ids.length ? Math.round(ivSum / ids.length) : 0 };
+    return { total: n, due: due, overdue: overdue, maxOverdue: maxOver, avgIv: n ? Math.round(ivSum / n) : 0 };
   };
 
   // ---------- 随机（按日期种子可复现）----------
@@ -321,6 +325,7 @@
     var by = {};
     Object.keys(state.papers).forEach(function (qid) {
       var st = state.papers[qid];
+      if (!st) return; // 脏存档兜底：papers 里值为空则不计入
       var type = qid.split('-')[1] === 'l' ? 'listening' : (qid.split('-')[1] === 'c' ? 'cloze' : (qid.split('-')[1] === 'm' ? 'match' : 'reading'));
       // id 形如 2026-06-1-l-3
       var parts = qid.split('-');
@@ -342,15 +347,16 @@
       var s = JSON.parse(raw);
       if (!s.version) return CORE.newState();
       // 迁移：旧版错题条目补自适应字段（按原 box 阶梯推算 iv）
-      if (s.wrongbook) {
+      if (s.wrongbook && typeof s.wrongbook === 'object' && !Array.isArray(s.wrongbook)) {
         Object.keys(s.wrongbook).forEach(function (qid) {
           var wb = s.wrongbook[qid];
+          if (!wb || typeof wb !== 'object') return; // 脏存档：值为 null / 标量时跳过，不再抛错后整份状态被静默重置
           if (wb.ease === undefined) wb.ease = 2.5;
           if (wb.streak === undefined) wb.streak = 0;
           if (wb.iv === undefined) wb.iv = CORE.INTERVALS[Math.min(wb.box || 0, CORE.INTERVALS.length - 1)];
         });
       }
-      return s;
+      return CORE.normalizeState(s);
     } catch (e) { return CORE.newState(); }
   };
   CORE.newState = function () {
@@ -365,6 +371,7 @@
     var by = {};
     Object.keys(state.papers).forEach(function (qid) {
       var st = state.papers[qid];
+      if (!st) return; // 脏存档兜底
       var q = CORE.findQ(banks, qid);
       if (!q || !q.points) return;
       q.points.forEach(function (pt) {
@@ -418,6 +425,96 @@
       });
     });
     return out;
+  };
+
+  // ---------- 状态归一化（H-1：loadState / 导入 的唯一清洗入口）----------
+  /* 为什么需要：state 里几乎每个字段最终都会进 innerHTML（统计卡、错题行、热力图 title…）。
+     只要存档里混进一个字符串型数字，注入面就打开了。任何来源的 state（被篡改的
+     localStorage、旧备份、手改的 JSON）都先过一遍这里：只保留已知字段、已知类型，
+     数字一律 Number()、字符串一律限长、日期一律校验格式，从根上掐掉脏数据。
+     注意 plan：这里是"结构校验后保留"，不是无条件丢弃——plan 里带着今日清单的
+     done 状态、断点续做的 draft 与计时器剩余秒数，每次载入都清空会让刷新即丢进度。
+     结构不合法（items 不是数组等）或日期/版本不符时置 null，交给 ensurePlan 重算。 */
+  CORE.normalizeState = function (s) {
+    var st = CORE.newState();
+    st.version = 1;
+    var num = function (v) { v = Number(v); return isFinite(v) ? v : 0; };
+    var isObj = function (o) { return !!o && typeof o === 'object' && !Array.isArray(o); };
+    var str = function (v, n) { return String(v == null ? '' : v).slice(0, n); };
+    if (!isObj(s)) return st; // null / 数组 / 字符串存档：直接给一份全新状态，不抛异常
+    // history: 只保留对象值，所有数字字段强制 Number()
+    if (isObj(s.history)) {
+      Object.keys(s.history).forEach(function (d) {
+        var h = s.history[d]; if (!isObj(h)) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; // 日期键校验
+        st.history[d] = { minutes: num(h.minutes), done: !!h.done, floor: !!h.floor,
+          qCount: num(h.qCount), right: num(h.right), timed: num(h.timed),
+          timedWithin: num(h.timedWithin), timedSec: num(h.timedSec) };
+      });
+    }
+    // papers: 数字字段强制 Number，lastAnswer 限长
+    if (isObj(s.papers)) {
+      Object.keys(s.papers).forEach(function (q) {
+        var p = s.papers[q]; if (!isObj(p)) return;
+        st.papers[q] = { seen: num(p.seen), right: num(p.right), wrong: num(p.wrong),
+          lastAt: str(p.lastAt, 10), lastResult: p.lastResult === 'right' ? 'right' : 'wrong',
+          lastAnswer: p.lastAnswer == null ? null : String(p.lastAnswer).slice(0, 40) };
+      });
+    }
+    // wrongbook: 数字字段归一化，due 格式校验（题库里不存在的 qid 由 index.html 侧清理，core 不依赖题库）
+    if (isObj(s.wrongbook)) {
+      Object.keys(s.wrongbook).forEach(function (q) {
+        var w = s.wrongbook[q]; if (!isObj(w)) return;
+        st.wrongbook[q] = { addedAt: str(w.addedAt, 10), box: num(w.box), wrongCount: num(w.wrongCount),
+          due: /^\d{4}-\d{2}-\d{2}$/.test(w.due) ? w.due : CORE.todayStr(),
+          ease: Math.min(2.8, Math.max(1.3, num(w.ease) || 2.5)), iv: Math.max(1, num(w.iv) || 1),
+          streak: num(w.streak) };
+      });
+    }
+    // essays: 只保留字符串，限长 20000
+    st.essays = {};
+    ['writing', 'translation'].forEach(function (k) {
+      var e = s.essays && s.essays[k];
+      if (e && typeof e === 'object' && typeof e.text === 'string')
+        st.essays[k] = { lastAt: str(e.lastAt, 10), text: e.text.slice(0, 20000) };
+    });
+    // hl: 只保留 pid->字符串数组
+    st.hl = {};
+    if (isObj(s.hl)) {
+      Object.keys(s.hl).forEach(function (pid) {
+        var a = s.hl[pid];
+        if (Array.isArray(a)) { var b = a.filter(function(x){return typeof x==='string';}).slice(0,50).map(function(x){return x.slice(0,200);}); if (b.length) st.hl[pid] = b; }
+      });
+    }
+    // plan: 结构合法才保留（日期/版本在 ensurePlan 里还会再校验一次），否则置 null 强制重算
+    st.plan = null;
+    if (isObj(s.plan) && Array.isArray(s.plan.items)) {
+      var items = [];
+      s.plan.items.forEach(function (it) {
+        if (!isObj(it)) return;
+        var qids = Array.isArray(it.qids) ? it.qids.filter(function (x) { return typeof x === 'string' && x.length <= 64; }).slice(0, 60) : [];
+        var o = { key: str(it.key, 120), type: str(it.type, 24), qids: qids,
+          paperId: str(it.paperId, 24), label: str(it.label, 120),
+          done: !!it.done, minutes: num(it.minutes) };
+        if (it.review) o.review = true;
+        if (it.extra) o.extra = true;
+        if (it.isWrong) o.isWrong = true;
+        if (it.isPoint) o.isPoint = true;
+        if (it.timerLeft != null) o.timerLeft = num(it.timerLeft);
+        if (isObj(it.draft)) { // 断点续做草稿：{qid: 'A'} 形状，逐项限长
+          var dr = {};
+          Object.keys(it.draft).slice(0, 60).forEach(function (k) {
+            var v = it.draft[k];
+            if (typeof v === 'string' && k.length <= 64) dr[k.slice(0, 64)] = v.slice(0, 8);
+          });
+          if (Object.keys(dr).length) o.draft = dr;
+        }
+        items.push(o);
+      });
+      st.plan = { date: /^\d{4}-\d{2}-\d{2}$/.test(s.plan.date) ? s.plan.date : '', v: num(s.plan.v), items: items };
+    }
+    st.lastBackup = typeof s.lastBackup === 'string' ? s.lastBackup.slice(0, 10) : '';
+    return st;
   };
 
   // ---------- 判题 ----------
