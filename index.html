@@ -89,6 +89,10 @@
   .sample.show { display:block; }
   .linkline { margin-bottom:12px; }
   .linkline a { color:var(--brand); }
+  /* 考场限时（P2） */
+  .qtimer { color:var(--sub); font-size:12px; font-weight:700; letter-spacing:.5px; white-space:nowrap; }
+  .qtimer.overtime { color:var(--bad); animation:qt-blink 1s infinite; }
+  @keyframes qt-blink { 50% { opacity:.35; } }
 
   /* 错题本 */
   .wb-item { display:flex; align-items:center; gap:10px; padding:10px 2px; border-bottom:1px solid var(--line); }
@@ -221,7 +225,7 @@
   <div class="quiz-wrap">
     <div class="qtop">
       <button class="back" id="quizBack">← 退出</button>
-      <span class="qprog" id="quizProg"></span>
+      <span style="display:flex;align-items:center;gap:8px"><span class="qtimer" id="quizTimer"></span><span class="qprog" id="quizProg"></span></span>
     </div>
     <div id="quizBody"></div>
   </div>
@@ -383,7 +387,7 @@
   }
   function histToday() {
     var h = state.history[today];
-    if (!h) { h = state.history[today] = { minutes: 0, done: false, floor: false, qCount: 0, right: 0 }; }
+    if (!h) { h = state.history[today] = { minutes: 0, done: false, floor: false, qCount: 0, right: 0, timed: 0, timedWithin: 0, timedSec: 0 }; }
     return h;
   }
   function addMinutes(min) { var h = histToday(); h.minutes += min; save(); }
@@ -478,16 +482,76 @@
   }
 
   // ---------- 做题（整组同屏 · 断点续做）----------
+  // 考场限时（P2）：按真实 CET6 单题标准折算——听力 30min/25题≈72s，选词60s，匹配/阅读120s；写作/翻译各 30min
+  var SEC_PER_Q = { listening: 72, cloze: 60, match: 120, reading: 120 };
+  var ESSAY_SEC = { writing: 1800, translation: 1800 };
+  function limitSecFor(it) {
+    if (it.type === 'writing' || it.type === 'translation') return ESSAY_SEC[it.type];
+    return (SEC_PER_Q[it.type] || 90) * (it.qids || []).length;
+  }
+  function fmtClock(sec) {
+    var m = Math.floor(Math.max(0, sec) / 60), s = Math.max(0, sec) % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  function renderTimer() {
+    var s = session, el = $('quizTimer');
+    if (!el || !s || s.limitSec == null) return;
+    el.textContent = '⏱ ' + fmtClock(s.leftSec);
+    el.className = 'qtimer' + (s.overtime ? ' overtime' : '');
+  }
+  function startTimer() {
+    var s = session;
+    if (!s || s.limitSec == null) return;
+    if (s.timerId) clearInterval(s.timerId);
+    renderTimer();
+    s.timerId = setInterval(function () {
+      s.leftSec--;
+      renderTimer();
+      if (s.leftSec <= 0 && !s.overtime) {
+        s.overtime = true; renderTimer();
+        toast('⏰ 时间到！已超考场标准时限（软提醒，答题可继续，判分时会标注）');
+      }
+      if (s.leftSec % 15 === 0) { s.item.timerLeft = Math.max(0, s.leftSec); save(); } // 剩余时间落盘防意外退出
+    }, 1000);
+  }
+  function stopTimer() {
+    var s = session;
+    if (s && s.timerId) { clearInterval(s.timerId); s.timerId = null; }
+  }
+  function recordTime(it) { // 判分/完成时记录用时与达标，随当日统计累计
+    var s = session;
+    if (!s || s.limitSec == null || it.timeSpentSec != null) return;
+    it.timeSpentSec = s.limitSec - Math.max(0, s.leftSec);
+    it.withinTime = !s.overtime && it.timeSpentSec <= s.limitSec;
+    delete it.timerLeft;
+    var h = histToday();
+    h.timed = (h.timed || 0) + 1;
+    if (it.withinTime) h.timedWithin = (h.timedWithin || 0) + 1;
+    h.timedSec = (h.timedSec || 0) + it.timeSpentSec;
+    save();
+  }
   function startItem(it) {
     session = { item: it, qids: (it.qids || []).slice(), draft: (it.draft && !it.done) ? it.draft : {}, submitted: false };
+    var s = session;
+    s.limitSec = limitSecFor(it);
+    s.leftSec = (it.timerLeft != null ? it.timerLeft : s.limitSec);
+    s.overtime = s.leftSec <= 0;
     $('quiz').classList.add('show');
     renderGroup();
+    startTimer();
   }
   function quizExit() {
+    stopTimer();
+    var s = session;
+    if (s && s.limitSec != null && !s.submitted && itOfSession().timeSpentSec == null) {
+      s.item.timerLeft = Math.max(0, s.leftSec); // 断点续做：剩余时间随草稿保存
+      save();
+    }
     $('quiz').classList.remove('show');
     session = null;
     renderToday(); renderWrong(); renderStat();
   }
+  function itOfSession() { return session ? session.item : null; }
   function saveDraft() { // 草稿即时存入清单条目（plan 在 state 内，持久化），退出浏览器可续做
     var s = session;
     if (s && s.item && s.item.qids && !s.item.isWrong) { s.item.draft = s.draft; save(); }
@@ -546,7 +610,7 @@
       $('essayTa').oninput = function () {
         state.essays[it.type] = { lastAt: today, text: this.value }; save();
       };
-      $('essayDone').onclick = function () { finishItem(it); quizExit(); };
+      $('essayDone').onclick = function () { recordTime(it); finishItem(it); quizExit(); };
       $('essaySample').onclick = function () { $('sampleBox').classList.toggle('show'); };
       $('essayCheck').onclick = function () { runEssayCheck(it, paper, wt); };
       return;
@@ -583,6 +647,7 @@
         '<button class="btn" id="groupSubmit"' + (answered >= s.qids.length ? '' : ' disabled') + '>提交本组（' + answered + '/' + s.qids.length + '）</button></div></div>';
     } else {
       html += '<div class="card" id="groupBar"><div class="row"><b>本组结果：' + (s.rightCount || 0) + '/' + s.qids.length + ' 答对</b>' +
+        (s.item.timeSpentSec != null ? '<span class="muted">用时 ' + fmtClock(s.item.timeSpentSec) + ' / 标准 ' + fmtClock(s.limitSec) + (s.item.withinTime ? ' ✓ 达标' : ' ⚠ 超时') + '</span>' : '') +
         '<button class="btn ok" id="groupDone">完成，返回今日</button></div></div>';
     }
     body.innerHTML = html;
@@ -663,6 +728,7 @@
     });
     s.submitted = true; s.rightCount = right;
     if (it.qids && !it.isWrong) { delete it.draft; } // 判分后清空草稿
+    recordTime(it); // 判分同时记录考场用时（只在首次判分时生效）
     save();
     renderGroup();
     window.scrollTo(0, 0);
@@ -832,13 +898,19 @@
       } else run = 0;
       return '<i class="' + cls + '" title="' + d.date + ' ' + d.minutes + '分钟' + (d.floor ? '（忙日打卡）' : '') + (on ? ' · 连击第 ' + run + ' 天' : '') + '">' + txt + '</i>';
     }).join('');
-    var totalQ = 0, totalR = 0;
+    var totalQ = 0, totalR = 0, timedAll = 0, timedOk = 0, timedSec = 0;
     Object.keys(state.papers).forEach(function (id) { totalQ += state.papers[id].seen; totalR += state.papers[id].right; });
+    Object.keys(state.history).forEach(function (d) {
+      var x = state.history[d];
+      timedAll += x.timed || 0; timedOk += x.timedWithin || 0; timedSec += x.timedSec || 0;
+    });
     $('statGrid').innerHTML =
       statCell('🔥 连击', C.streak(state.history, today) + ' 天') +
       statCell('今日', (h ? h.minutes : 0) + ' 分钟') +
       statCell('累计做题', totalQ + ' 题') +
-      statCell('总体正确率', totalQ ? Math.round(totalR / totalQ * 100) + '%' : '—');
+      statCell('总体正确率', totalQ ? Math.round(totalR / totalQ * 100) + '%' : '—') +
+      statCell('限时达标', timedAll ? timedOk + '/' + timedAll + ' 组' : '—') +
+      statCell('平均每组用时', timedAll ? fmtClock(Math.round(timedSec / timedAll)) : '—');
     var acc = C.accuracyByType(state);
     var rows = '<tr><th>题型</th><th>做题数</th><th>正确数</th><th>正确率</th></tr>';
     ['listening', 'cloze', 'match', 'reading'].forEach(function (t) {
