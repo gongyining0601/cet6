@@ -15,20 +15,32 @@
   :root {
     --bg:#f5f6f8; --card:#fff; --ink:#1c2333; --sub:#6b7280; --line:#e5e7eb;
     --brand:#2f5af5; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
+    --c1:#eef2f7; --c2:#eef2ff; --c3:#dcfce7; --c4:#fef2f2; --c5:#fff3e0; --c6:#fef08a;
+    --c7:#fff7e6; --c8:#fdf2f8; --c9:#fef3c7; --c10:#fee2e2; --c11:#e0e7ff; --c12:#eef0f3;
+    --c13:#f0fdf4; --c14:#fff1f0; --c15:#be185d; --c16:#b45309; --c17:#4338ca; --c18:#874d00;
+    --toast:#1c2333; --hl:#fff3b0;
     --r:12px;
+  }
+  body.dark {
+    --bg:#0f172a; --card:#1e293b; --ink:#e2e8f0; --sub:#94a3b8; --line:#334155;
+    --c1:#273244; --c2:#1e3a5f; --c3:#14532d; --c4:#450a0a; --c5:#422006; --c6:#42300d;
+    --c7:#3b2f0e; --c8:#4a1d3a; --c9:#3a2c0a; --c10:#4c1d1d; --c11:#1e2f5a; --c12:#2a3346;
+    --c13:#123524; --c14:#3f1d1b; --c15:#f9a8d4; --c16:#fcd34d; --c17:#a5b4fc; --c18:#fbbf24;
+    --toast:#334155; --hl:#5b4a15;
   }
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--ink); font-size:15px; line-height:1.65; }
   #app { max-width:760px; margin:0 auto; padding:14px 14px 90px; }
   #loginMask { position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex; align-items:center; justify-content:center; z-index:99; }
-  #loginMask .box { background:#fff; border-radius:14px; padding:22px 18px; width:86%; max-width:340px; }
+  #loginMask .box { background:var(--card); border-radius:14px; padding:22px 18px; width:86%; max-width:340px; }
   #loginMask h3 { margin:0 0 6px; }
-  #loginMask input { width:100%; box-sizing:border-box; padding:10px; margin:10px 0; border:1px solid #d6dbe3; border-radius:8px; font-size:16px; }
-  .user-chip { font-size:12px; color:var(--sub); background:#eef2f7; border-radius:10px; padding:2px 10px; cursor:pointer; }
+  #loginMask input { width:100%; box-sizing:border-box; padding:10px; margin:10px 0; border:1px solid var(--line); border-radius:8px; font-size:16px; color:inherit; background:var(--card); }
+  .user-chip { font-size:12px; color:var(--sub); background:var(--c1); border-radius:10px; padding:2px 10px; cursor:pointer; }
+  #themeBtn { background:none; border:none; font-size:15px; cursor:pointer; padding:2px 6px; }
   header { display:flex; justify-content:space-between; align-items:baseline; padding:6px 2px 12px; }
   header h1 { font-size:19px; }
   header .date { color:var(--sub); font-size:13px; }
-  .streak-chip { display:inline-block; background:#fff3e0; color:var(--warn); border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
+  .streak-chip { display:inline-block; background:var(--c5); color:var(--warn); border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
 
   nav { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); display:flex; z-index:50; }
   nav button { flex:1; padding:11px 0 13px; background:none; border:none; font-size:13px; color:var(--sub); cursor:pointer; }
@@ -45,14 +57,14 @@
   .btn.ok { background:var(--ok); } .btn.warn { background:var(--warn); }
 
   .plan-item { display:flex; align-items:center; gap:12px; }
-  .plan-item .ic { width:40px; height:40px; border-radius:10px; background:#eef2ff; color:var(--brand); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; flex:none; }
+  .plan-item .ic { width:40px; height:40px; border-radius:10px; background:var(--c2); color:var(--brand); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; flex:none; }
   .plan-item .bd { flex:1; min-width:0; }
-  .plan-item.done .ic { background:#dcfce7; color:var(--ok); }
-  .prog { height:5px; background:#eef0f3; border-radius:3px; margin-top:5px; overflow:hidden; }
+  .plan-item.done .ic { background:var(--c3); color:var(--ok); }
+  .prog { height:5px; background:var(--c12); border-radius:3px; margin-top:5px; overflow:hidden; }
   .prog i { display:block; height:100%; background:var(--brand); }
   .badge { font-size:12px; border-radius:6px; padding:1px 7px; margin-left:6px; }
-  .badge.extra { background:#fdf2f8; color:#be185d; }
-  .badge.review { background:#fef3c7; color:#b45309; }
+  .badge.extra { background:var(--c8); color:var(--c15); }
+  .badge.review { background:var(--c9); color:var(--c16); }
 
   .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
   .bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
@@ -69,22 +81,25 @@
   .passage.collapsed { max-height:120px; overflow:hidden; position:relative; }
   .passage-toggle { text-align:center; margin:-6px 0 12px; }
   .passage-toggle button { background:none; border:none; color:var(--brand); cursor:pointer; font-size:13px; padding:4px 10px; }
-  .blank-mark { background:#fef08a; border-radius:3px; padding:0 3px; font-weight:700; }
+  .blank-mark { background:var(--c6); border-radius:3px; padding:0 3px; font-weight:700; }
   .blank-mark.focus { background:var(--brand); color:#fff; }
   .opt { display:block; width:100%; text-align:left; background:var(--card); border:1.5px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:8px; font-size:14.5px; cursor:pointer; line-height:1.5; }
-  .opt.sel { border-color:var(--brand); background:#eef2ff; }
-  .opt.right { border-color:var(--ok); background:#f0fdf4; }
-  .opt.wrongpick { border-color:var(--bad); background:#fef2f2; }
+  .opt.sel { border-color:var(--brand); background:var(--c2); }
+  .opt.right { border-color:var(--ok); background:var(--c13); }
+  .opt.wrongpick { border-color:var(--bad); background:var(--c4); }
   .opt:disabled { cursor:default; }
   .wordbank { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
   .wordbank span { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 10px; font-size:13.5px; }
+  mark.hl { background:var(--hl); border-radius:3px; padding:0 1px; cursor:pointer; }
+  .hl-bar { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin:-4px 0 12px; font-size:12.5px; color:var(--sub); }
+  .hl-bar button { background:none; border:none; color:var(--brand); cursor:pointer; font-size:12.5px; padding:2px 8px; }
   .analysis { background:var(--card); border-left:4px solid var(--ok); border-radius:8px; padding:12px 14px; margin-top:12px; font-size:14px; }
   .analysis.bad { border-left-color:var(--bad); }
-  .analysis .pt { display:inline-block; background:#eef2ff; color:var(--brand); border-radius:6px; padding:1px 8px; font-size:12.5px; margin:0 6px 6px 0; }
+  .analysis .pt { display:inline-block; background:var(--c2); color:var(--brand); border-radius:6px; padding:1px 8px; font-size:12.5px; margin:0 6px 6px 0; }
   .analysis .body { white-space:pre-wrap; }
   .verdict { font-weight:700; font-size:15px; margin-bottom:8px; }
   .verdict.ok { color:var(--ok); } .verdict.bad { color:var(--bad); }
-  .essay-ta { width:100%; min-height:180px; border:1.5px solid var(--line); border-radius:10px; padding:12px; font-size:14.5px; font-family:inherit; resize:vertical; }
+  .essay-ta { width:100%; min-height:180px; border:1.5px solid var(--line); border-radius:10px; padding:12px; font-size:14.5px; font-family:inherit; resize:vertical; color:inherit; background:var(--card); }
   .sample { background:var(--card); border:1px dashed var(--line); border-radius:10px; padding:12px 14px; margin-top:12px; font-size:14px; white-space:pre-wrap; display:none; }
   .sample.show { display:block; }
   .linkline { margin-bottom:12px; }
@@ -100,12 +115,12 @@
   .wb-item .meta { flex:1; min-width:0; font-size:13px; color:var(--sub); }
   .wb-item .stem { color:var(--ink); font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .chip { font-size:12px; border-radius:6px; padding:1px 8px; flex:none; }
-  .chip.due { background:#fee2e2; color:var(--bad); }
-  .chip.sched { background:#e0e7ff; color:#4338ca; }
+  .chip.due { background:var(--c10); color:var(--bad); }
+  .chip.sched { background:var(--c11); color:var(--c17); }
 
   /* 统计 */
   .heat { display:flex; flex-wrap:wrap; gap:3px; margin-top:8px; }
-  .heat i { width:18px; height:18px; border-radius:4px; background:#ebedf0; font-style:normal; }
+  .heat i { width:18px; height:18px; border-radius:4px; background:var(--c12); font-style:normal; }
   .heat i.on { font-size:10px; line-height:18px; text-align:center; color:#fff; font-weight:600; }
   .heat i.f2 { background:#7cc0ff; } .heat i.f3 { background:#2f5af5; }
   .heat i.st1 { background:#9ecbff; } .heat i.st2 { background:#5c9df7; }
@@ -119,7 +134,7 @@
   .tips { font-size:13px; color:var(--sub); }
   .tips li { margin:6px 0 6px 18px; }
   #importFile { display:none; }
-  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#1c2333; color:#fff; border-radius:999px; padding:8px 20px; font-size:13.5px; z-index:300; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--toast); color:#fff; border-radius:999px; padding:8px 20px; font-size:13.5px; z-index:300; opacity:0; transition:opacity .25s; pointer-events:none; }
   .toast.show { opacity:.95; }
   .empty { text-align:center; color:var(--sub); padding:26px 0; }
 </style>
@@ -128,7 +143,7 @@
 <div id="app">
   <header>
     <h1>CET6 每日打卡<span class="streak-chip" id="streakChip">🔥 0 天</span></h1>
-    <span class="user-chip" id="userChip"></span>
+    <span style="display:flex;align-items:center;gap:8px"><button id="themeBtn" title="切换深色/浅色模式">🌙</button><span class="user-chip" id="userChip"></span></span>
     <span class="date" id="todayLabel"></span>
   </header>
 
@@ -153,7 +168,7 @@
       <div class="row" style="margin-top:6px">
         <span class="muted" id="todayStatus"></span>
       </div>
-      <div id="backupHint" style="display:none;margin-top:6px;padding:8px 10px;background:#fff7e6;border:1px solid #fadb14;border-radius:8px;font-size:12px;color:#874d00"></div>
+      <div id="backupHint" style="display:none;margin-top:6px;padding:8px 10px;background:var(--c7);border:1px solid var(--c6);border-radius:8px;font-size:12px;color:var(--c18)"></div>
       <div class="actions">
         <button class="btn warn" id="floorBtn">⏰ 每天坚持一下，让习惯不断线</button>
       </div>
@@ -194,9 +209,11 @@
       <p class="tips" style="margin-top:4px">全部记录保存在<strong>本浏览器的本地存储</strong>里，不上传任何服务器。清浏览器数据、换电脑/手机前，请先导出。</p>
       <div class="actions">
         <button class="btn" id="exportBtn">导出备份 JSON</button>
+        <button class="btn" id="wrongCsvBtn">导出错题本 CSV</button>
         <button class="btn ghost" id="importBtn">导入备份</button>
         <input type="file" id="importFile" accept=".json">
       </div>
+      <p class="tips" style="margin-top:6px">错题 CSV 含题号/卷/题型/题干/你的答案/正确答案/考点/错次/下次复习，可用 Excel 打开，方便做自己的复盘表。</p>
     </div>
     <div class="card">
       <h3>建议节奏</h3>
@@ -361,9 +378,24 @@
     });
   }
 
+  // P4 深色/浅色模式：body.dark 类切换，偏好持久化到 localStorage（按学习编号共享同一主题偏好）
+  function bindTheme() {
+    var btn = $('themeBtn');
+    if (!btn) return;
+    var dark = store.getItem('cet6_theme') === '1';
+    document.body.classList.toggle('dark', dark);
+    btn.textContent = dark ? '☀️' : '🌙';
+    btn.onclick = function () {
+      var d = !document.body.classList.contains('dark');
+      document.body.classList.toggle('dark', d);
+      store.setItem('cet6_theme', d ? '1' : '0');
+      btn.textContent = d ? '☀️' : '🌙';
+      toast(d ? '已切换到深色模式' : '已切换到浅色模式');
+    };
+  }
+
   // 顶栏账号：点击切换用户（多人共用一台设备时）
-  function bindUserChip() {
-    var chip = document.getElementById('userChip');
+  function bindUserChip() {    var chip = document.getElementById('userChip');
     if (!chip) return;
     chip.textContent = '👤 ' + maskPhone(user);
     chip.title = '点击切换用户';
@@ -447,7 +479,7 @@
         bh.style.display = 'block';
         bh.innerHTML = '💾 你的练习记录已积累 ' + days + ' 天。数据只存在本机浏览器里，建议去「备份」页导出一份留底' +
           (last ? '（上次备份已是 ' + overdue + ' 天前）' : '') + '——' +
-          '<a href="#" id="backupHintGo" style="color:#d48806;font-weight:bold">现在就去 →</a>';
+          '<a href="#" id="backupHintGo" style="color:var(--warn);font-weight:bold">现在就去 →</a>';
         var go = $('backupHintGo');
         if (go) go.onclick = function (e) { e.preventDefault(); showPage('backup'); };
       } else { bh.style.display = 'none'; }
@@ -631,14 +663,17 @@
           (lu ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" title="听力播放器"></iframe>' : '<div class="empty">本卷听力页暂不可用，请在浏览器搜索该卷听力音频</div>') +
           '</div>';
       } else if (run.type === 'cloze') {
-        html += renderClozePassage(run.paper, run.qs);
+        var cPid = run.paper.id + '#cloze#' + run.mk;
+        html += renderClozePassage(run.paper, run.qs, cPid) + hlBar(cPid);
         html += '<div class="wordbank">' + (run.qs[0].options || []).map(function (w) { return '<span>' + esc(w) + '</span>'; }).join('') + '</div>';
       } else if (run.type === 'match') {
-        html += '<div class="passage" style="max-height:none"><b>' + esc(run.paper.matchIntro || '') + '</b>\n\n' +
-          (run.paper.matchParagraphs || []).map(function (p) { return '[' + p.label + '] ' + p.text; }).join('\n\n') + '</div>';
+        var mPid = run.paper.id + '#match#' + run.mk;
+        html += '<div class="passage" data-pid="' + esc(mPid) + '" style="max-height:none"><b>' + esc(run.paper.matchIntro || '') + '</b>\n\n' +
+          (run.paper.matchParagraphs || []).map(function (p) { return '[' + p.label + '] ' + p.text; }).join('\n\n') + '</div>' + hlBar(mPid);
       } else if (run.type === 'reading') {
+        var rPid = run.paper.id + '#reading#' + run.mk;
         var rp = (run.paper.readingPassages || {})[String(run.qs[0].qno)] || '';
-        html += '<div class="passage" style="max-height:none">' + esc(rp) + '</div>';
+        html += '<div class="passage" data-pid="' + esc(rPid) + '" style="max-height:none">' + esc(rp) + '</div>' + hlBar(rPid);
       }
       run.qs.forEach(function (q) { html += renderOneQ(q, run.paper); });
     });
@@ -651,6 +686,8 @@
         '<button class="btn ok" id="groupDone">完成，返回今日</button></div></div>';
     }
     body.innerHTML = html;
+    restoreHl();
+    attachHighlighter();
     if (!s.submitted) {
       Array.prototype.forEach.call(body.querySelectorAll('.opt'), function (b) {
         b.onclick = function () {
@@ -725,6 +762,7 @@
       var correct = C.judge(q, s.draft[id]);
       if (correct) right++;
       C.recordResult(state, id, correct, today);
+      if (!correct) state.papers[id].lastAnswer = s.draft[id]; // 错题 CSV 用：记下你答错的选项
       var h = histToday(); h.qCount++; if (correct) h.right++;
     });
     s.submitted = true; s.rightCount = right;
@@ -734,15 +772,102 @@
     renderGroup();
     window.scrollTo(0, 0);
   }
-  function renderClozePassage(paper, qs) {
+  function renderClozePassage(paper, qs, pid) {
     var txt = paper.clozePassage || '';
     var qnos = qs.map(function (q) { return q.qno; });
-    var html = '<div class="passage" style="max-height:none;overflow:visible">' + esc(txt);
+    var html = '<div class="passage" data-pid="' + esc(pid) + '" style="max-height:none;overflow:visible">' + esc(txt);
     html = html.replace(/\b(2[6-9]|3[0-5])\b/g, function (m) {
       if (qnos.indexOf(Number(m)) < 0) return m;
       return '<span class="blank-mark">' + m + '</span>';
     });
     return html + '</div>';
+  }
+
+  // ---------- P4 阅读划词高亮：选中文字 → 点「高亮」标黄；点已高亮词取消；随做题组持久化到 state.hl ----------
+  function hlBar(pid) {
+    return '<div class="hl-bar"><span>🖍 划选文字后点「高亮」，点击已高亮词可取消</span>' +
+      '<button class="hl-add" data-pid="' + esc(pid) + '">高亮</button>' +
+      '<button class="hl-clear" data-pid="' + esc(pid) + '">清本段</button></div>';
+  }
+  function passageOfPid(pid) {
+    var ps = $('quizBody').querySelectorAll('.passage');
+    for (var i = 0; i < ps.length; i++) if (ps[i].getAttribute('data-pid') === pid) return ps[i];
+    return null;
+  }
+  function saveHl(pid) {
+    state.hl = state.hl || {}; // 旧存档可能没有 hl 字段
+    var p = passageOfPid(pid);
+    var texts = [];
+    if (p) Array.prototype.forEach.call(p.querySelectorAll('mark.hl'), function (m) { texts.push(m.textContent); });
+    if (texts.length) state.hl[pid] = texts; else delete state.hl[pid];
+    save();
+  }
+  // 恢复持久化的高亮：在段落文本里按原文定位首个匹配并包 <mark>
+  function restoreHl() {
+    var saved = state.hl || {};
+    Array.prototype.forEach.call($('quizBody').querySelectorAll('.passage[data-pid]'), function (p) {
+      var pid = p.getAttribute('data-pid');
+      var texts = saved[pid];
+      if (!texts || !texts.length) return;
+      texts.forEach(function (t) {
+        var walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          var n = walker.currentNode;
+          if (!n.nodeValue || n.parentNode.tagName === 'MARK') continue;
+          var idx = n.nodeValue.indexOf(t);
+          if (idx < 0) continue;
+          var mark = document.createElement('mark');
+          mark.className = 'hl';
+          n.parentNode.insertBefore(document.createTextNode(n.nodeValue.slice(0, idx)), n);
+          mark.appendChild(document.createTextNode(t));
+          n.parentNode.insertBefore(mark, n);
+          n.parentNode.insertBefore(document.createTextNode(n.nodeValue.slice(idx + t.length)), n);
+          n.parentNode.removeChild(n);
+          break;
+        }
+      });
+    });
+  }
+  function attachHighlighter() {
+    var body = $('quizBody');
+    // 高亮选中文字：选择范围必须在对应段落内
+    Array.prototype.forEach.call(body.querySelectorAll('.hl-add'), function (btn) {
+      btn.onclick = function () {
+        var pid = btn.getAttribute('data-pid');
+        var p = passageOfPid(pid);
+        var sel = window.getSelection();
+        if (!sel || sel.isCollapsed) { toast('先在文章里划选一段文字，再点「高亮」'); return; }
+        if (!p || !p.contains(sel.getRangeAt(0).commonAncestorContainer)) { toast('请在要标记的段落内划选文字'); sel.removeAllRanges(); return; }
+        var range = sel.getRangeAt(0).cloneRange();
+        sel.removeAllRanges();
+        var mark = document.createElement('mark');
+        mark.className = 'hl';
+        try {
+          var frag = range.extractContents();
+          mark.appendChild(frag);
+          range.insertNode(mark);
+        } catch (e) { toast('这段选择无法高亮，换个划法试试'); return; }
+        saveHl(pid);
+      };
+    });
+    // 清除整段高亮
+    Array.prototype.forEach.call(body.querySelectorAll('.hl-clear'), function (btn) {
+      btn.onclick = function () {
+        var pid = btn.getAttribute('data-pid');
+        var p = passageOfPid(pid);
+        if (p) Array.prototype.forEach.call(p.querySelectorAll('mark.hl'), function (m) { m.remove(); });
+        saveHl(pid);
+      };
+    });
+    // 点击已高亮词 → 取消该处高亮
+    Array.prototype.forEach.call(body.querySelectorAll('mark.hl'), function (m) {
+      m.onclick = function () {
+        var p = m.parentNode && m.parentNode.closest ? m.parentNode.closest('.passage') : null;
+        var pid = p ? p.getAttribute('data-pid') : null;
+        m.remove();
+        if (pid) saveHl(pid);
+      };
+    });
   }
 
   function paperForItem(it) {
@@ -1007,8 +1132,45 @@
     state.lastBackup = today; save();
     toast('已导出，请妥善保存这份备份文件');
   };
-  $('importBtn').onclick = function () { $('importFile').click(); };
-  $('importFile').onchange = function () {
+  // P4 错题导出 CSV：题号/卷/题型/题干/你的答案/正确答案/考点/错次/下次复习/稳固度，Excel 可直接打开
+  function csvEsc(v) {
+    v = String(v == null ? '' : v);
+    if (/[",\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+  $('wrongCsvBtn').onclick = function () {
+    var ids = C.allWrongIds(state);
+    if (!ids.length) { toast('错题本是空的，做错题后再来导出'); return; }
+    ids.sort(function (a, b) {
+      var pa = C.findPaper(BANKS, a), pb = C.findPaper(BANKS, b);
+      if (pa.id !== pb.id) return pa.id < pb.id ? -1 : 1;
+      return C.findQ(BANKS, a).qno - C.findQ(BANKS, b).qno;
+    });
+    var lines = ['卷号,题号,题型,题干,你的答案,正确答案,考点,错次,下次复习,稳固度'];
+    ids.forEach(function (id) {
+      var q = C.findQ(BANKS, id), wb = state.wrongbook[id], pp = C.findPaper(BANKS, id);
+      lines.push([
+        pp.id,
+        q.qno,
+        TYPE_ZH[q.type] || q.type,
+        (q.stem || (q.type === 'cloze' ? '选词填空第' + q.qno + '空' : '')).replace(/\s+/g, ' '),
+        state.papers[id] && state.papers[id].lastAnswer != null ? state.papers[id].lastAnswer : '',
+        q.answer,
+        (q.points || []).join(' / '),
+        wb.wrongCount,
+        wb.due,
+        Math.round((wb.ease || 2.5) / 2.8 * 100) + '%'
+      ].map(csvEsc).join(','));
+    });
+    var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cet6-wrongbook-' + today + '.csv';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+    toast('已导出 ' + ids.length + ' 道错题（CSV）');
+  };
+  $('importBtn').onclick = function () { $('importFile').click(); };  $('importFile').onchange = function () {
     var f = this.files[0]; if (!f) return;
     var r = new FileReader();
     r.onload = function () {
@@ -1058,6 +1220,7 @@
     renderToday(); renderWrong(); renderStat();
   }
   $('todayLabel').textContent = today;
+  bindTheme();
   bindUserChip();
   renderAll();
 })();
