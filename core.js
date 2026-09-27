@@ -83,10 +83,11 @@
     if (wb.iv <= 1) return 2;
     return Math.min(60, Math.max(1, Math.round(wb.iv * wb.ease)));
   };
-  // 记录一题结果：更新 papers / wrongbook
-  CORE.recordResult = function (state, qid, correct, dateStr) {
+  // 记录一题结果：更新 papers / wrongbook；points 为可选的考点快照（按需加载：统计页与加载状态无关）
+  CORE.recordResult = function (state, qid, correct, dateStr, points) {
     var st = state.papers[qid] || (state.papers[qid] = { seen: 0, wrong: 0, right: 0 });
     st.seen++; st.lastAt = dateStr; st.lastResult = correct ? 'right' : 'wrong';
+    if (Array.isArray(points) && points.length) st.points = points.slice(0, 8);
     if (correct) { st.right++; } else { st.wrong++; }
     if (correct) {
       var wb = state.wrongbook[qid];
@@ -210,15 +211,48 @@
     });
     return units;
   };
+  /* 按需加载（架构级）：题库可处于两种形态——
+     ① 全量（banks 的 questions 有内容，测试/完整加载）：单元由 unitList 现算；
+     ② meta 骨架（app/bank/meta.js，首屏只带元数据）：每卷的 units 已固化在 meta.papers[id].units 里，
+        genPlan/extraGroup 直接展开，无需题目正文。
+     unitsOf(src) 自动识别两种形态，保证清单生成逻辑单一实现。 */
+  CORE.isFullBank = function (src) {
+    return !!(Array.isArray(src) && src.length && src[0] && Array.isArray(src[0].questions) && src[0].questions.length);
+  };
+  CORE.unitsOf = function (src) {
+    if (CORE.isFullBank(src)) return CORE.unitList(src);
+    var units = [];
+    var papers = (src && src.papers) || {};
+    Object.keys(papers).forEach(function (id) {
+      var p = papers[id];
+      if (p && Array.isArray(p.units)) units = units.concat(p.units);
+    });
+    return units;
+  };
+  // 由 qid（如 2026-06-1-l-3）解析卷 id：题型字母固定为 l/c/m/r + 数字
+  CORE.paperIdOf = function (qid) {
+    var m = /^(.*)-(l|c|m|r)-\d+$/.exec(String(qid));
+    return m ? m[1] : String(qid);
+  };
+  // 从 meta 骨架查单题元数据（type/qno/points），供未加载卷的统计与清单使用
+  CORE.qMeta = function (meta, qid) {
+    if (!meta || !meta.papers) return null;
+    var p = meta.papers[CORE.paperIdOf(qid)];
+    if (!p || !Array.isArray(p.qLite)) return null;
+    for (var i = 0; i < p.qLite.length; i++) if (p.qLite[i].id === qid) return p.qLite[i];
+    return null;
+  };
   CORE.genPlan = function (state, banks, dateStr) {
+    var isFull = CORE.isFullBank(banks);
+    var meta = !isFull ? banks : null;
     var items = [];
     var planIds = {};
     // 1) 到期错题复习组（封顶 REVIEW_CAP 分钟；同卷同题型相邻打包保持语境完整）
     var reviewMin = 0;
     var groups = [];
     CORE.reviewQueue(state, banks, dateStr).forEach(function (qid) {
-      var q = CORE.findQ(banks, qid);
-      var paper = CORE.findPaper(banks, qid);
+      var q = isFull ? CORE.findQ(banks, qid) : CORE.qMeta(meta, qid);
+      var paper = isFull ? CORE.findPaper(banks, qid) : { id: CORE.paperIdOf(qid) };
       if (!q || !paper) return;
       var per = CORE.TYPE_META[q.type] ? CORE.TYPE_META[q.type].minPerQ : 1;
       if (reviewMin + per > CORE.REVIEW_CAP) return; // 放不下的留到明天，队列不丢
@@ -229,7 +263,7 @@
     });
     groups.forEach(function (g) {
       g.qids.sort(function (a, b) {
-        return C_findQno(banks, a) - C_findQno(banks, b);
+        return (isFull ? C_findQno(banks, a) : (CORE.qMeta(meta, a) || {}).qno || 0) - (isFull ? C_findQno(banks, b) : (CORE.qMeta(meta, b) || {}).qno || 0);
       });
       items.push({ key: 'review-' + g.type + '-' + g.paperId, type: g.type, qids: g.qids, paperId: g.paperId, label: '错题复习·' + CORE.TYPE_META[g.type].zh + ' ' + g.qids.length + '题', done: false, minutes: 0, review: true });
     });
@@ -237,11 +271,11 @@
     var target = CORE.PLAN_TARGET, cap = CORE.PLAN_CAP;
     var dParts = dateStr.split('-').map(Number);
     var dow = new Date(dParts[0], dParts[1] - 1, dParts[2]).getDay();
-    var units = CORE.unitList(banks);
+    var units = CORE.unitsOf(banks);
     if (dow === 6) {
       var weekIdx = Math.floor(CORE.dayDiff('2020-01-04', dateStr) / 7); // 2020-01-04 为周六锚点
       var wtype = weekIdx % 2 === 0 ? 'writing' : 'translation';
-      var wp = CORE.paperOrder(banks)[0];
+      var wp = isFull ? CORE.paperOrder(banks)[0] : { id: (meta && meta.order && meta.order[0]) || '' };
       for (var wi = 0; wi < units.length; wi++) {
         if (!units[wi].qids.every(function (id) { return state.papers[id]; })) { wp = { id: units[wi].paperId }; break; }
       }
@@ -292,7 +326,7 @@
   CORE.extraGroup = function (state, banks, dateStr, type) {
     var planIds = {};
     (state.plan && state.plan.items || []).forEach(function (it) { (it.qids || []).forEach(function (id) { planIds[id] = 1; }); });
-    var units = CORE.unitList(banks);
+    var units = CORE.unitsOf(banks);
     for (var i = 0; i < units.length; i++) {
       var u = units[i];
       if (u.type !== type) continue;
@@ -373,14 +407,22 @@
   };
 
   // 考点维度正确率：按每题 points 标签聚合（历史做题记录，不新增练习量）
-  CORE.accuracyByPoint = function (state, banks) {
+  // 按需加载：points 优先取 papers 里的快照（做题时写入，与加载状态无关），
+  // 旧存档无快照时回退 findQ（已加载卷）或 qMeta（meta 骨架也能查）。
+  CORE.accuracyByPoint = function (state, banks, meta) {
     var by = {};
     Object.keys(state.papers).forEach(function (qid) {
       var st = state.papers[qid];
       if (!st) return; // 脏存档兜底
-      var q = CORE.findQ(banks, qid);
-      if (!q || !q.points) return;
-      q.points.forEach(function (pt) {
+      var points = null;
+      if (Array.isArray(st.points) && st.points.length) points = st.points;
+      else {
+        var q = CORE.findQ(banks, qid);
+        if (q && Array.isArray(q.points)) points = q.points;
+        else if (meta) { var qm = CORE.qMeta(meta, qid); if (qm && Array.isArray(qm.points)) points = qm.points; }
+      }
+      if (!points) return;
+      points.forEach(function (pt) {
         by[pt] = by[pt] || { seen: 0, right: 0 };
         by[pt].seen += st.seen; by[pt].right += st.right;
       });
@@ -461,9 +503,10 @@
       writeTransEstimate: wt };
   };
   // 最薄弱考点：练过 ≥ minSeen 题且正确率最低（并列时取做题多者，更可信）
-  CORE.weakestPoint = function (state, banks, minSeen) {
+  // 按需加载：meta 参数透传给 accuracyByPoint，未加载卷的考点也能聚合
+  CORE.weakestPoint = function (state, banks, minSeen, meta) {
     minSeen = minSeen || 3;
-    var by = CORE.accuracyByPoint(state, banks);
+    var by = CORE.accuracyByPoint(state, banks, meta);
     var best = null;
     Object.keys(by).forEach(function (pt) {
       var a = by[pt];
@@ -475,11 +518,21 @@
     });
     return best;
   };
-  // 含指定考点的全部题 ID（供专项练选题）
+  // 含指定考点的全部题 ID（供专项练选题）；按需加载下支持 meta 骨架（qLite）
   CORE.pointIds = function (banks, pt) {
     var out = [];
-    banks.forEach(function (b) {
-      (b.questions || []).forEach(function (q) {
+    if (CORE.isFullBank(banks)) {
+      banks.forEach(function (b) {
+        (b.questions || []).forEach(function (q) {
+          if ((q.points || []).indexOf(pt) >= 0) out.push(q.id);
+        });
+      });
+      return out;
+    }
+    var papers = (banks && banks.papers) || {};
+    Object.keys(papers).forEach(function (pid) {
+      var p = papers[pid];
+      (p && Array.isArray(p.qLite) ? p.qLite : []).forEach(function (q) {
         if ((q.points || []).indexOf(pt) >= 0) out.push(q.id);
       });
     });
@@ -534,13 +587,17 @@
           timedWithin: clamp(h.timedWithin, 0, 1e7), timedSec: clamp(h.timedSec, 0, 1e7) };
       });
     }
-    // papers: 数字字段强制 Number，lastAnswer 限长
+    // papers: 数字字段强制 Number，lastAnswer 限长；points 考点快照（按需加载统计用）保留并清洗
     if (isObj(s.papers)) {
       Object.keys(s.papers).forEach(function (q) {
         var p = s.papers[q]; if (!isObj(p)) return;
         st.papers[q] = { seen: clamp(p.seen, 0, 1e7), right: clamp(p.right, 0, 1e7), wrong: clamp(p.wrong, 0, 1e7),
           lastAt: dateOr(p.lastAt, ''), lastResult: p.lastResult === 'right' ? 'right' : 'wrong',
           lastAnswer: p.lastAnswer == null ? null : String(p.lastAnswer).slice(0, 40) };
+        if (Array.isArray(p.points)) {
+          var pts = p.points.filter(function (x) { return typeof x === 'string' && x.length <= 40; }).slice(0, 8);
+          if (pts.length) st.papers[q].points = pts;
+        }
       });
     }
     // wrongbook: 数字字段归一化，due 格式校验（题库里不存在的 qid 由 index.html 侧清理，core 不依赖题库）
