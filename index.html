@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="六级打卡">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>CET6 每日打卡 · 真题练习</title>
+<style>
+  :root {
+    --bg:#f5f6f8; --card:#fff; --ink:#1c2333; --sub:#6b7280; --line:#e5e7eb;
+    --brand:#2f5af5; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
+    --r:12px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--ink); font-size:15px; line-height:1.65; }
+  #app { max-width:760px; margin:0 auto; padding:14px 14px 90px; }
+  #loginMask { position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex; align-items:center; justify-content:center; z-index:99; }
+  #loginMask .box { background:#fff; border-radius:14px; padding:22px 18px; width:86%; max-width:340px; }
+  #loginMask h3 { margin:0 0 6px; }
+  #loginMask input { width:100%; box-sizing:border-box; padding:10px; margin:10px 0; border:1px solid #d6dbe3; border-radius:8px; font-size:16px; }
+  .user-chip { font-size:12px; color:var(--sub); background:#eef2f7; border-radius:10px; padding:2px 10px; cursor:pointer; }
+  header { display:flex; justify-content:space-between; align-items:baseline; padding:6px 2px 12px; }
+  header h1 { font-size:19px; }
+  header .date { color:var(--sub); font-size:13px; }
+  .streak-chip { display:inline-block; background:#fff3e0; color:var(--warn); border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
+
+  nav { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); display:flex; z-index:50; }
+  nav button { flex:1; padding:11px 0 13px; background:none; border:none; font-size:13px; color:var(--sub); cursor:pointer; }
+  nav button.on { color:var(--brand); font-weight:700; }
+
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; }
+  .card h3 { font-size:15px; margin-bottom:6px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .muted { color:var(--sub); font-size:13px; }
+  .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  .btn:disabled { background:#c3c8d4; cursor:not-allowed; }
+  .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  .btn.small { padding:5px 12px; font-size:13px; }
+  .btn.ok { background:var(--ok); } .btn.warn { background:var(--warn); }
+
+  .plan-item { display:flex; align-items:center; gap:12px; }
+  .plan-item .ic { width:40px; height:40px; border-radius:10px; background:#eef2ff; color:var(--brand); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; flex:none; }
+  .plan-item .bd { flex:1; min-width:0; }
+  .plan-item.done .ic { background:#dcfce7; color:var(--ok); }
+  .prog { height:5px; background:#eef0f3; border-radius:3px; margin-top:5px; overflow:hidden; }
+  .prog i { display:block; height:100%; background:var(--brand); }
+  .badge { font-size:12px; border-radius:6px; padding:1px 7px; margin-left:6px; }
+  .badge.extra { background:#fdf2f8; color:#be185d; }
+  .badge.review { background:#fef3c7; color:#b45309; }
+
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .total-min { font-size:13px; color:var(--sub); }
+
+  /* 做题视图 */
+  #quiz { position:fixed; inset:0; background:var(--bg); z-index:100; overflow-y:auto; display:none; }
+  #quiz.show { display:block; }
+  .quiz-wrap { max-width:760px; margin:0 auto; padding:14px; }
+  .qtop { display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; }
+  .qtop .back { background:none; border:none; color:var(--sub); font-size:14px; cursor:pointer; padding:6px 0; }
+  .qprog { font-size:13px; color:var(--sub); }
+  .passage { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; font-size:14px; white-space:pre-wrap; max-height:340px; overflow-y:auto; }
+  .passage.collapsed { max-height:120px; overflow:hidden; position:relative; }
+  .passage-toggle { text-align:center; margin:-6px 0 12px; }
+  .passage-toggle button { background:none; border:none; color:var(--brand); cursor:pointer; font-size:13px; padding:4px 10px; }
+  .blank-mark { background:#fef08a; border-radius:3px; padding:0 3px; font-weight:700; }
+  .blank-mark.focus { background:var(--brand); color:#fff; }
+  .opt { display:block; width:100%; text-align:left; background:var(--card); border:1.5px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:8px; font-size:14.5px; cursor:pointer; line-height:1.5; }
+  .opt.sel { border-color:var(--brand); background:#eef2ff; }
+  .opt.right { border-color:var(--ok); background:#f0fdf4; }
+  .opt.wrongpick { border-color:var(--bad); background:#fef2f2; }
+  .opt:disabled { cursor:default; }
+  .wordbank { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .wordbank span { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 10px; font-size:13.5px; }
+  .analysis { background:var(--card); border-left:4px solid var(--ok); border-radius:8px; padding:12px 14px; margin-top:12px; font-size:14px; }
+  .analysis.bad { border-left-color:var(--bad); }
+  .analysis .pt { display:inline-block; background:#eef2ff; color:var(--brand); border-radius:6px; padding:1px 8px; font-size:12.5px; margin:0 6px 6px 0; }
+  .analysis .body { white-space:pre-wrap; }
+  .verdict { font-weight:700; font-size:15px; margin-bottom:8px; }
+  .verdict.ok { color:var(--ok); } .verdict.bad { color:var(--bad); }
+  .essay-ta { width:100%; min-height:180px; border:1.5px solid var(--line); border-radius:10px; padding:12px; font-size:14.5px; font-family:inherit; resize:vertical; }
+  .sample { background:var(--card); border:1px dashed var(--line); border-radius:10px; padding:12px 14px; margin-top:12px; font-size:14px; white-space:pre-wrap; display:none; }
+  .sample.show { display:block; }
+  .linkline { margin-bottom:12px; }
+  .linkline a { color:var(--brand); }
+
+  /* 错题本 */
+  .wb-item { display:flex; align-items:center; gap:10px; padding:10px 2px; border-bottom:1px solid var(--line); }
+  .wb-item:last-child { border-bottom:none; }
+  .wb-item .meta { flex:1; min-width:0; font-size:13px; color:var(--sub); }
+  .wb-item .stem { color:var(--ink); font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip { font-size:12px; border-radius:6px; padding:1px 8px; flex:none; }
+  .chip.due { background:#fee2e2; color:var(--bad); }
+  .chip.sched { background:#e0e7ff; color:#4338ca; }
+
+  /* 统计 */
+  .heat { display:flex; flex-wrap:wrap; gap:3px; margin-top:8px; }
+  .heat i { width:18px; height:18px; border-radius:4px; background:#ebedf0; font-style:normal; }
+  .heat i.on { font-size:10px; line-height:18px; text-align:center; color:#fff; font-weight:600; }
+  .heat i.f2 { background:#7cc0ff; } .heat i.f3 { background:#2f5af5; }
+  .heat i.st1 { background:#9ecbff; } .heat i.st2 { background:#5c9df7; }
+  .heat i.floor { background:linear-gradient(135deg,#fbbf24,#f59e0b); }
+  .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+  .stat-cell { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
+  .stat-cell .v { font-size:22px; font-weight:800; }
+  .stat-cell .k { font-size:12.5px; color:var(--sub); }
+  table.acc { width:100%; border-collapse:collapse; margin-top:8px; font-size:13.5px; }
+  table.acc th, table.acc td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  .tips { font-size:13px; color:var(--sub); }
+  .tips li { margin:6px 0 6px 18px; }
+  #importFile { display:none; }
+  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#1c2333; color:#fff; border-radius:999px; padding:8px 20px; font-size:13.5px; z-index:300; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast.show { opacity:.95; }
+  .empty { text-align:center; color:var(--sub); padding:26px 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>CET6 每日打卡<span class="streak-chip" id="streakChip">🔥 0 天</span></h1>
+    <span class="user-chip" id="userChip"></span>
+    <span class="date" id="todayLabel"></span>
+  </header>
+
+  <!-- 今日 -->
+  <section id="page-today">
+    <div class="bar">
+      <b id="planSummary"></b>
+      <span class="total-min" id="todayMinutes"></span>
+    </div>
+    <div id="planList"></div>
+    <div class="card">
+      <div class="row">
+        <div>
+          <h3>加练（不设上限）</h3>
+          <div class="muted">在今日清单之外再抽一组，时间照常计入打卡</div>
+        </div>
+      </div>
+      <div class="actions" id="extraBtns"></div>
+    </div>
+    <div class="card">
+      <h3>今天状态</h3>
+      <div class="row" style="margin-top:6px">
+        <span class="muted" id="todayStatus"></span>
+      </div>
+      <div id="backupHint" style="display:none;margin-top:6px;padding:8px 10px;background:#fff7e6;border:1px solid #fadb14;border-radius:8px;font-size:12px;color:#874d00"></div>
+      <div class="actions">
+        <button class="btn warn" id="floorBtn">⏰ 每天坚持一下，让习惯不断线</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 错题本 -->
+  <section id="page-wrong" style="display:none">
+    <div class="bar"><b>错题本</b><span class="total-min" id="wrongSummary"></span></div>
+    <div class="card" id="dueList"></div>
+    <div class="card" id="allWrongList"></div>
+  </section>
+
+  <!-- 统计 -->
+  <section id="page-stat" style="display:none">
+    <div class="bar"><b>学习统计</b><span class="total-min" id="statSummary"></span></div>
+    <div class="card">
+      <h3>最近 12 周</h3>
+      <div class="heat" id="heatmap"></div>
+      <div class="muted" style="margin-top:8px">格内数字=连击第几天（中断重新记录），灰格=未打卡</div>
+    </div>
+    <div class="stat-grid" id="statGrid"></div>
+    <div class="card">
+      <h3>各题型正确率</h3>
+      <table class="acc" id="accTable"></table>
+    </div>
+    <div class="card">
+      <h3>考点正确率（薄弱在前）</h3>
+      <table class="acc" id="ptTable"></table>
+    </div>
+  </section>
+
+  <!-- 备份 -->
+  <section id="page-backup" style="display:none">
+    <div class="bar"><b>备份与迁移</b></div>
+    <div class="card">
+      <h3>打卡数据在这里</h3>
+      <p class="tips" style="margin-top:4px">全部记录保存在<strong>本浏览器的本地存储</strong>里，不上传任何服务器。清浏览器数据、换电脑/手机前，请先导出。</p>
+      <div class="actions">
+        <button class="btn" id="exportBtn">导出备份 JSON</button>
+        <button class="btn ghost" id="importBtn">导入备份</button>
+        <input type="file" id="importFile" accept=".json">
+      </div>
+    </div>
+    <div class="card">
+      <h3>建议节奏</h3>
+      <ul class="tips">
+        <li>每周日导出一次，保存到 <b>D:\CET6\backup\</b></li>
+        <li>换设备：旧设备导出 → 新设备打开本页导入即可无缝衔接</li>
+        <li>文件名形如 cet6-backup-日期.json，留好别删</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>当前题库</h3>
+      <div id="bankInfo" class="muted"></div>
+    </div>
+  </section>
+
+  <nav>
+    <button data-p="today" class="on">今日</button>
+    <button data-p="wrong">错题本</button>
+    <button data-p="stat">统计</button>
+    <button data-p="backup">备份</button>
+  </nav>
+</div>
+
+<!-- 做题浮层 -->
+<div id="quiz">
+  <div class="quiz-wrap">
+    <div class="qtop">
+      <button class="back" id="quizBack">← 退出</button>
+      <span class="qprog" id="quizProg"></span>
+    </div>
+    <div id="quizBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="core.js"></script>
+  <script src="bank/cet6-2015-06-1.js"></script>
+  <script src="bank/cet6-2015-06-2.js"></script>
+  <script src="bank/cet6-2015-06-3.js"></script>
+  <script src="bank/cet6-2015-12-1.js"></script>
+  <script src="bank/cet6-2015-12-2.js"></script>
+  <script src="bank/cet6-2015-12-3.js"></script>
+  <script src="bank/cet6-2016-06-1.js"></script>
+  <script src="bank/cet6-2016-06-2.js"></script>
+  <script src="bank/cet6-2016-06-3.js"></script>
+  <script src="bank/cet6-2016-12-1.js"></script>
+  <script src="bank/cet6-2016-12-2.js"></script>
+  <script src="bank/cet6-2016-12-3.js"></script>
+  <script src="bank/cet6-2017-06-1.js"></script>
+  <script src="bank/cet6-2017-06-2.js"></script>
+  <script src="bank/cet6-2017-06-3.js"></script>
+  <script src="bank/cet6-2017-12-1.js"></script>
+  <script src="bank/cet6-2017-12-2.js"></script>
+  <script src="bank/cet6-2017-12-3.js"></script>
+  <script src="bank/cet6-2018-06-1.js"></script>
+  <script src="bank/cet6-2018-06-2.js"></script>
+  <script src="bank/cet6-2018-06-3.js"></script>
+  <script src="bank/cet6-2018-12-1.js"></script>
+  <script src="bank/cet6-2018-12-2.js"></script>
+  <script src="bank/cet6-2018-12-3.js"></script>
+  <script src="bank/cet6-2019-06-1.js"></script>
+  <script src="bank/cet6-2019-06-2.js"></script>
+  <script src="bank/cet6-2019-06-3.js"></script>
+  <script src="bank/cet6-2019-12-1.js"></script>
+  <script src="bank/cet6-2019-12-2.js"></script>
+  <script src="bank/cet6-2019-12-3.js"></script>
+  <script src="bank/cet6-2020-07-1.js"></script>
+  <script src="bank/cet6-2020-09-1.js"></script>
+  <script src="bank/cet6-2020-09-2.js"></script>
+  <script src="bank/cet6-2020-09-3.js"></script>
+  <script src="bank/cet6-2020-12-1.js"></script>
+  <script src="bank/cet6-2020-12-2.js"></script>
+  <script src="bank/cet6-2020-12-3.js"></script>
+  <script src="bank/cet6-2021-06-1.js"></script>
+  <script src="bank/cet6-2021-06-2.js"></script>
+  <script src="bank/cet6-2021-06-3.js"></script>
+  <script src="bank/cet6-2021-12-1.js"></script>
+  <script src="bank/cet6-2021-12-2.js"></script>
+  <script src="bank/cet6-2021-12-3.js"></script>
+  <script src="bank/cet6-2022-06-1.js"></script>
+  <script src="bank/cet6-2022-06-2.js"></script>
+  <script src="bank/cet6-2022-06-3.js"></script>
+  <script src="bank/cet6-2022-09-1.js"></script>
+  <script src="bank/cet6-2022-09-2.js"></script>
+  <script src="bank/cet6-2022-09-3.js"></script>
+  <script src="bank/cet6-2022-12-1.js"></script>
+  <script src="bank/cet6-2022-12-2.js"></script>
+  <script src="bank/cet6-2022-12-3.js"></script>
+  <script src="bank/cet6-2023-03-1.js"></script>
+  <script src="bank/cet6-2023-03-2.js"></script>
+  <script src="bank/cet6-2023-03-3.js"></script>
+  <script src="bank/cet6-2023-06-1.js"></script>
+  <script src="bank/cet6-2023-06-2.js"></script>
+  <script src="bank/cet6-2023-06-3.js"></script>
+  <script src="bank/cet6-2023-12-1.js"></script>
+  <script src="bank/cet6-2023-12-2.js"></script>
+  <script src="bank/cet6-2023-12-3.js"></script>
+  <script src="bank/cet6-2024-06-1.js"></script>
+  <script src="bank/cet6-2024-06-2.js"></script>
+  <script src="bank/cet6-2024-06-3.js"></script>
+  <script src="bank/cet6-2024-12-1.js"></script>
+  <script src="bank/cet6-2024-12-2.js"></script>
+  <script src="bank/cet6-2024-12-3.js"></script>
+  <script src="bank/cet6-2025-06-1.js"></script>
+  <script src="bank/cet6-2025-06-2.js"></script>
+  <script src="bank/cet6-2025-06-3.js"></script>
+  <script src="bank/cet6-2025-12-1.js"></script>
+  <script src="bank/cet6-2025-12-2.js"></script>
+  <script src="bank/cet6-2025-12-3.js"></script>
+  <script src="bank/cet6-2026-06-1.js"></script>
+  <script src="bank/cet6-2026-06-2.js"></script>
+  <script src="bank/cet6-2026-06-3.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.CET6Core, BANKS = window.CET6_BANKS || [];
+  var store = window.localStorage;
+
+  // 题库完整性检查：某个真题卷文件加载失败时不静默缺卷
+  if (!window.CET6_BANKS || CET6_BANKS.length < 76) {
+    (function () {
+      var got = (window.CET6_BANKS || []).length;
+      var d = document.createElement('div');
+      d.style.cssText = 'background:#fff1f0;border:1px solid #ffa39e;color:#a8071a;padding:8px 12px;font-size:13px';
+      d.textContent = '⚠️ 题库只加载了 ' + got + '/76 卷（网络波动），部分考期的卷子暂不可用。刷新页面重试；刷新后仍有此提示请清除浏览器缓存再打开。';
+      var first = document.body.firstChild;
+      document.body.insertBefore(d, first);
+    })();
+  }
+  // ---------- 手机号登录（本地多账号：每号独立存档，数据只存本机）----------
+  var USER_KEY = 'cet6_user';
+  var user = store.getItem(USER_KEY) || '';
+  function maskPhone(ph) { return ph || ''; } // 4 位学习编号，无需脱敏
+  if (!/^\d{4}$/.test(user)) { showLogin(); return; } // 未登录：只出登录层，不初始化应用
+  var STATE_KEY = C.stateKey(user);
+  // 单账号时代旧数据迁移：本机默认 key 有数据且该手机号还没有存档 → 归到当前手机号名下
+  if (!store.getItem(STATE_KEY) && store.getItem(C.STORAGE_KEY)) {
+    store.setItem(STATE_KEY, store.getItem(C.STORAGE_KEY));
+    store.removeItem(C.STORAGE_KEY);
+  }
+  var state = C.loadState(store, STATE_KEY);
+  var today = C.todayStr();
+  var session = null; // {item, qids, draft, submitted, rightCount}
+
+  function showLogin() {
+    var mask = document.createElement('div');
+    mask.id = 'loginMask';
+    mask.innerHTML = '<div class="box"><h3>📱 输入你的学习编号</h3>' +
+      '<div class="muted">每人一个 4 位数字编号（比如 1001、2026），各自的练习记录分开保存。数据只存在你这台设备的浏览器里，不上传、不联网。</div>' +
+      '<input id="phoneInput" inputmode="numeric" maxlength="4" placeholder="输入 4 位数字编号" style="text-align:center;font-size:20px;letter-spacing:8px">' +
+      '<button class="btn" id="loginBtn" style="width:100%">开始学习</button></div>';
+    document.body.appendChild(mask);
+    document.getElementById('loginBtn').onclick = function () {
+      var ph = (document.getElementById('phoneInput').value || '').trim();
+      if (!/^\d{4}$/.test(ph)) { alert('请输入 4 位数字编号'); return; }
+      store.setItem(USER_KEY, ph);
+      location.reload();
+    };
+    document.getElementById('phoneInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') document.getElementById('loginBtn').click();
+    });
+  }
+
+  // 顶栏账号：点击切换用户（多人共用一台设备时）
+  function bindUserChip() {
+    var chip = document.getElementById('userChip');
+    if (!chip) return;
+    chip.textContent = '👤 ' + maskPhone(user);
+    chip.title = '点击切换用户';
+    chip.onclick = function () {
+      var ph = prompt('切换用户：输入另一个 4 位数字编号（当前 ' + maskPhone(user) + '）', '');
+      if (ph === null) return;
+      ph = ph.trim();
+      if (!/^\d{4}$/.test(ph)) { alert('编号格式不对（要 4 位数字），没切换'); return; }
+      store.setItem(USER_KEY, ph);
+      location.reload();
+    };
+  }
+
+  // ---------- 工具 ----------
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function toast(msg) { var t = $('toast'); t.textContent = msg; t.className = 'toast show'; setTimeout(function () { t.className = 'toast'; }, 1800); }
+  function save() {
+    try { C.saveState(store, state, STATE_KEY); }
+    catch (e) { toast('⚠️ 保存失败：浏览器存储不可用（隐私/无痕模式或空间已满），本次进度可能无法保留，建议导出备份后换正常模式使用'); }
+  }
+  function histToday() {
+    var h = state.history[today];
+    if (!h) { h = state.history[today] = { minutes: 0, done: false, floor: false, qCount: 0, right: 0 }; }
+    return h;
+  }
+  function addMinutes(min) { var h = histToday(); h.minutes += min; save(); }
+
+  // ---------- 今日清单 ----------
+  function ensurePlan() {
+    // plan.v 缺失 = 旧版本生成的清单结构（如 P6 每日写译/最旧卷取题），必须丢弃重算
+    if (!state.plan || state.plan.date !== today || state.plan.v !== (C.PLAN_VERSION || 2)) {
+      state.plan = C.genPlan(state, BANKS, today);
+      save();
+    }
+    return state.plan;
+  }
+  function itemMinutes(it) {
+    if (it.type === 'writing') return 15;
+    if (it.type === 'translation') return 12;
+    var per = C.TYPE_META[it.type] ? C.TYPE_META[it.type].minPerQ : 1;
+    return Math.round(per * (it.qids || []).length * 10) / 10;
+  }
+  function renderToday() {
+    var plan = ensurePlan();
+    var list = $('planList'); list.innerHTML = '';
+    var doneCount = 0, totalMin = 0, planMin = 0;
+    plan.items.forEach(function (it, i) {
+      planMin += itemMinutes(it);
+      if (it.done) doneCount++;
+      var meta = C.TYPE_META[it.type] || { zh: it.type };
+      var n = (it.qids || []).length;
+      var card = document.createElement('div');
+      card.className = 'card plan-item' + (it.done ? ' done' : '');
+      card.innerHTML =
+        '<div class="ic">' + (it.done ? '✓' : esc(meta.zh.slice(0, 1))) + '</div>' +
+        '<div class="bd"><b>' + esc(it.label || meta.group || meta.zh) + (it.extra ? '<span class="badge extra">加练</span>' : '') + (it.review ? '<span class="badge review">复习</span>' : '') + '</b>' +
+        '<div class="muted">' + (it.paperId ? esc(it.paperId) + ' · ' : '') + (n ? n + ' 题 · ' : '') + '预计 ' + itemMinutes(it) + ' 分钟</div>' +
+        '<div class="prog"><i style="width:' + (it.done ? 100 : 0) + '%"></i></div></div>' +
+        '<button class="btn small' + (it.done ? ' ghost' : '') + '">' + (it.done ? '已完成' : '开始') + '</button>';
+      card.querySelector('button').onclick = function () { startItem(it); };
+      list.appendChild(card);
+    });
+    var h = state.history[today];
+    totalMin = h ? h.minutes : 0;
+    $('planSummary').textContent = '今日清单 ' + doneCount + '/' + plan.items.length + ' 组 · 目标 25–40 分钟';
+    $('todayMinutes').textContent = '已练 ' + totalMin + ' 分钟（清单预计 ' + Math.round(planMin) + ' 分钟）';
+    var streak = C.streak(state.history, today);
+    $('streakChip').textContent = '🔥 ' + streak + ' 天';
+    var hd = h && (h.done || h.floor);
+    $('todayStatus').textContent = hd
+      ? (h.floor ? '今日忙日打卡（' + h.minutes + ' 分钟）——再忙也没断，这份坚持最值钱 💪' : '今日已通关 ✓（' + h.minutes + ' 分钟），连击 +1')
+      : '完成今天的任务点击下方记录';
+    // 备份提醒：有 5 天以上记录且从未备份，或距上次备份超过 7 天
+    var bh = $('backupHint');
+    if (bh) {
+      var days = Object.keys(state.history || {}).length;
+      var last = state.lastBackup || '';
+      var overdue = last ? Math.round((new Date(today) - new Date(last)) / 86400000) : -1;
+      if (days >= 5 && (last === '' || overdue > 7)) {
+        bh.style.display = 'block';
+        bh.innerHTML = '💾 你的练习记录已积累 ' + days + ' 天。数据只存在本机浏览器里，建议去「备份」页导出一份留底' +
+          (last ? '（上次备份已是 ' + overdue + ' 天前）' : '') + '——' +
+          '<a href="#" id="backupHintGo" style="color:#d48806;font-weight:bold">现在就去 →</a>';
+        var go = $('backupHintGo');
+        if (go) go.onclick = function (e) { e.preventDefault(); showPage('backup'); };
+      } else { bh.style.display = 'none'; }
+    }
+    // 加练按钮
+    var ex = $('extraBtns'); ex.innerHTML = '';
+    ['listening', 'cloze', 'match', 'reading'].forEach(function (t) {
+      var b = document.createElement('button');
+      b.className = 'btn small ghost';
+      b.textContent = '+ ' + C.TYPE_META[t].zh;
+      b.onclick = function () {
+        var g = C.extraGroup(state, BANKS, today, t);
+        if (!g) { toast('该题型没有剩余题目了'); return; }
+        state.plan.items.push(g); save(); renderToday();
+        toast('已加入一组' + C.TYPE_META[t].zh + '加练');
+      };
+      ex.appendChild(b);
+    });
+  }
+
+  // ---------- 打卡写入 ----------
+  function finishItem(it) {
+    it.done = true;
+    var h = histToday();
+    h.minutes += itemMinutes(it);
+    save();
+    var plan = state.plan;
+    var allDone = plan.items.filter(function (x) { return !x.extra; }).every(function (x) { return x.done; });
+    if (allDone && !h.done) { h.done = true; save(); toast('🎉 今日清单全部完成，打卡成功！'); }
+    else toast('本组完成 +' + itemMinutes(it) + ' 分钟');
+    renderToday();
+  }
+
+  // ---------- 做题（整组同屏 · 断点续做）----------
+  function startItem(it) {
+    session = { item: it, qids: (it.qids || []).slice(), draft: (it.draft && !it.done) ? it.draft : {}, submitted: false };
+    $('quiz').classList.add('show');
+    renderGroup();
+  }
+  function quizExit() {
+    $('quiz').classList.remove('show');
+    session = null;
+    renderToday(); renderWrong(); renderStat();
+  }
+  function saveDraft() { // 草稿即时存入清单条目（plan 在 state 内，持久化），退出浏览器可续做
+    var s = session;
+    if (s && s.item && s.item.qids && !s.item.isWrong) { s.item.draft = s.draft; save(); }
+  }
+  // 连续同材料题块：同卷听音频 / 选词同篇 / 匹配同篇 / 阅读同篇 → 材料只渲染一次，题目依次排列
+  function buildRuns(qids) {
+    var runs = [];
+    qids.forEach(function (id) {
+      var q = C.findQ(BANKS, id); if (!q) return;
+      var paper = C.findPaper(BANKS, id);
+      var mk;
+      if (q.type === 'listening') mk = 'audio';
+      else if (q.type === 'cloze') mk = 'cloze';
+      else if (q.type === 'match') mk = 'match';
+      else mk = 'read' + Math.floor((q.qno - 46) / 5);
+      var last = runs[runs.length - 1];
+      if (last && last.paper === paper && last.type === q.type && last.mk === mk) last.qs.push(q);
+      else runs.push({ paper: paper, type: q.type, mk: mk, qs: [q] });
+    });
+    return runs;
+  }
+  function renderGroup() {
+    var s = session, it = s.item;
+    var body = $('quizBody');
+    // 写作/翻译组（每周一练）
+    if (it.type === 'writing' || it.type === 'translation') {
+      var paper = paperForItem(it);
+      var wt = it.type === 'writing' ? paper.writing : paper.translation;
+      var label = it.type === 'writing' ? '写作' : '翻译（汉译英）';
+      $('quizProg').textContent = label + ' · ' + paper.id + ' · 每周一练';
+      var draft = (state.essays[it.type] && state.essays[it.type].text) || '';
+      body.innerHTML =
+        '<div class="card"><h3>' + label + '题面（' + esc(paper.id) + '）</h3>' +
+        '<div class="passage" style="max-height:none">' + esc(wt.prompt) + '</div></div>' +
+        '<textarea class="essay-ta" id="essayTa" placeholder="在这里打草稿（自动保存，可不写）">' + esc(draft) + '</textarea>' +
+        '<div class="actions" style="margin-top:12px">' +
+        '<button class="btn" id="essayDone">我写完了，本组打卡</button>' +
+        '<button class="btn ghost" id="essaySample">查看参考范文</button>' +
+        '<button class="btn ghost" id="essayCheck">' + (it.type === 'translation' ? '踩分词自查' : '字数体检') + '</button></div>' +
+        '<div class="sample" id="sampleBox">' + esc(wt.sample) + '</div>' +
+        '<div class="sample" id="checkBox"></div>';
+      $('essayTa').oninput = function () {
+        state.essays[it.type] = { lastAt: today, text: this.value }; save();
+      };
+      $('essayDone').onclick = function () { finishItem(it); quizExit(); };
+      $('essaySample').onclick = function () { $('sampleBox').classList.toggle('show'); };
+      $('essayCheck').onclick = function () { runEssayCheck(it, paper, wt); };
+      return;
+    }
+    // 普通题组：整组同屏，逐题点选，组底一次判分
+    var answered = 0;
+    s.qids.forEach(function (id) { if (s.draft[id]) answered++; });
+    var grpPaper = (it.qids && it.qids.length) ? C.findPaper(BANKS, it.qids[0]) : null;
+    var grpTag = grpPaper ? grpPaper.id + ' · ' : (it.paperId ? it.paperId + ' · ' : '');
+    $('quizProg').textContent = grpTag + '本组 ' + s.qids.length + ' 题 · 已答 ' + answered + (s.submitted ? ' · 已判分' : '');
+    var html = '';
+    buildRuns(s.qids).forEach(function (run) {
+      if (run.type === 'listening') {
+        html += '<div class="card linkline"><b>🎧 听力音频</b>：点<a href="' + esc(run.paper.listeningUrl) + '" target="_blank" rel="noopener">打开在线听力页</a>（新标签页播放），本组 ' + run.qs.length + ' 题共用这一段录音。</div>';
+      } else if (run.type === 'cloze') {
+        html += renderClozePassage(run.paper, run.qs);
+        html += '<div class="wordbank">' + (run.qs[0].options || []).map(function (w) { return '<span>' + esc(w) + '</span>'; }).join('') + '</div>';
+      } else if (run.type === 'match') {
+        html += '<div class="passage" style="max-height:none"><b>' + esc(run.paper.matchIntro || '') + '</b>\n\n' +
+          (run.paper.matchParagraphs || []).map(function (p) { return '[' + p.label + '] ' + p.text; }).join('\n\n') + '</div>';
+      } else if (run.type === 'reading') {
+        var rp = (run.paper.readingPassages || {})[String(run.qs[0].qno)] || '';
+        html += '<div class="passage" style="max-height:none">' + esc(rp) + '</div>';
+      }
+      run.qs.forEach(function (q) { html += renderOneQ(q, run.paper); });
+    });
+    if (!s.submitted) {
+      html += '<div class="card" id="groupBar"><div class="row"><span class="muted">逐题点选作答，草稿自动保存；中途退出回来可续做</span>' +
+        '<button class="btn" id="groupSubmit"' + (answered >= s.qids.length ? '' : ' disabled') + '>提交本组（' + answered + '/' + s.qids.length + '）</button></div></div>';
+    } else {
+      html += '<div class="card" id="groupBar"><div class="row"><b>本组结果：' + (s.rightCount || 0) + '/' + s.qids.length + ' 答对</b>' +
+        '<button class="btn ok" id="groupDone">完成，返回今日</button></div></div>';
+    }
+    body.innerHTML = html;
+    if (!s.submitted) {
+      Array.prototype.forEach.call(body.querySelectorAll('.opt'), function (b) {
+        b.onclick = function () {
+          var qid = b.getAttribute('data-q');
+          s.draft[qid] = b.getAttribute('data-v');
+          Array.prototype.forEach.call(body.querySelectorAll('.opt[data-q="' + qid + '"]'), function (x) { x.classList.remove('sel'); });
+          b.classList.add('sel');
+          saveDraft();
+          var ans = 0; s.qids.forEach(function (id) { if (s.draft[id]) ans++; });
+          $('quizProg').textContent = grpTag + '本组 ' + s.qids.length + ' 题 · 已答 ' + ans;
+          var sb = $('groupSubmit');
+          if (sb) { sb.disabled = false; sb.textContent = '提交本组（' + ans + '/' + s.qids.length + '）'; }
+        };
+      });
+      $('groupSubmit').onclick = submitGroup;
+    } else {
+      $('groupDone').onclick = function () {
+        if (it.isWrong) { toast('本轮错题重练完成'); quizExit(); }
+        else { finishItem(it); quizExit(); }
+      };
+    }
+  }
+  function optBtn(q, v, text) {
+    var s = session;
+    var pick = s.draft[q.id] || null;
+    var cls = 'opt';
+    if (s.submitted) {
+      if (v === q.answer) cls += ' right';
+      else if (v === pick) cls += ' wrongpick';
+      return '<button class="' + cls + '" data-q="' + esc(q.id) + '" data-v="' + esc(v) + '" disabled>' + text + '</button>';
+    }
+    if (v === pick) cls += ' sel';
+    return '<button class="' + cls + '" data-q="' + esc(q.id) + '" data-v="' + esc(v) + '">' + text + '</button>';
+  }
+  function renderOneQ(q, paper) {
+    var html = '<div class="card"><b>' + (q.type === 'match' ? '' : 'Q' + esc(String(q.qno)) + '. ') + esc(q.stem) + '</b><span class="muted" style="display:block;margin-top:2px">真题 ' + esc(paper.id) + '</span>';
+    if (q.type === 'match') {
+      html += '<div class="muted" style="margin:6px 0 10px">这条信息出现在哪个段落？</div>';
+      var letters = (paper.matchParagraphs || []).map(function (p) { return p.label; });
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px">' + letters.map(function (L) {
+        return optBtn(q, L, L + ' 段');
+      }).join('') + '</div>';
+    } else if (q.type === 'cloze') {
+      html += '<div class="muted" style="margin:6px 0 10px">第 ' + esc(String(q.qno)) + ' 空应填哪个词？</div>';
+      html += (q.options || []).map(function (o, i) {
+        return optBtn(q, String.fromCharCode(65 + i), esc(o));
+      }).join('');
+    } else {
+      html += '<div style="margin-top:10px">' + (q.options || []).map(function (o, i) {
+        return optBtn(q, String.fromCharCode(65 + i), esc(o));
+      }).join('') + '</div>';
+    }
+    if (session.submitted) {
+      var pick = session.draft[q.id] || null;
+      var ok = pick === q.answer;
+      html += '<div class="analysis ' + (ok ? '' : 'bad') + '">' +
+        '<div class="verdict ' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓ 答对了' : '✗ 答错了，已加入错题本（遗忘曲线自动安排复习，连对 5 次出库）') + '</div>' +
+        ((q.points || []).length ? '<div style="margin-bottom:8px">' + q.points.map(function (p) { return '<span class="pt">' + esc(p) + '</span>'; }).join('') + '</div>' : '') +
+        '<div class="body">' + esc(q.analysis) + '</div></div>';
+    }
+    return html + '</div>';
+  }
+  function submitGroup() {
+    var s = session, it = s.item;
+    if (s.submitted) return; // 防重复判分/重复记录（连点、回车等任何路径只记一次）
+    var ans = 0; s.qids.forEach(function (id) { if (s.draft[id]) ans++; });
+    if (ans < s.qids.length) { toast('还有 ' + (s.qids.length - ans) + ' 题未作答'); return; }
+    var right = 0;
+    s.qids.forEach(function (id) {
+      var q = C.findQ(BANKS, id);
+      var correct = C.judge(q, s.draft[id]);
+      if (correct) right++;
+      C.recordResult(state, id, correct, today);
+      var h = histToday(); h.qCount++; if (correct) h.right++;
+    });
+    s.submitted = true; s.rightCount = right;
+    if (it.qids && !it.isWrong) { delete it.draft; } // 判分后清空草稿
+    save();
+    renderGroup();
+    window.scrollTo(0, 0);
+  }
+  function renderClozePassage(paper, qs) {
+    var txt = paper.clozePassage || '';
+    var qnos = qs.map(function (q) { return q.qno; });
+    var html = '<div class="passage" style="max-height:none;overflow:visible">' + esc(txt);
+    html = html.replace(/\b(2[6-9]|3[0-5])\b/g, function (m) {
+      if (qnos.indexOf(Number(m)) < 0) return m;
+      return '<span class="blank-mark">' + m + '</span>';
+    });
+    return html + '</div>';
+  }
+
+  function paperForItem(it) {
+    if (it.paperId) {
+      for (var i = 0; i < BANKS.length; i++) if (BANKS[i].id === it.paperId) return BANKS[i];
+    }
+    if (it.qids && it.qids.length) return C.findPaper(BANKS, it.qids[0]);
+    return BANKS[0];
+  }
+
+  // ---------- 底线模式 ----------
+  $('floorBtn').onclick = function () {
+    var h = histToday();
+    if (h.floor || h.done) { toast('今天已记录过打卡'); return; }
+    var m = prompt('今天再忙，也别让英语断档——记几分钟？（1 分钟也算数，坚持最可贵）：', '10');
+    if (m === null) return;
+    var min = Math.max(1, parseInt(m, 10) || 10);
+    h.floor = true; h.minutes += min; save();
+    toast('忙日打卡 ' + min + ' 分钟，坚持住了！明天继续加油 💪');
+    renderToday(); renderStat();
+  };
+
+  // ---------- 错题本（遗忘曲线智能调度）----------
+  function renderWrong() {
+    var due = C.reviewQueue(state, BANKS, today); // 智能排序：逾期越久、错次越多、记忆越弱越靠前
+    var all = C.allWrongIds(state);
+    var sum = C.wrongSummary(state, today);
+    var overTxt = sum.overdue ? '，其中逾期 ' + sum.overdue + ' 题（最久 ' + sum.maxOverdue + ' 天）' : '';
+    $('wrongSummary').textContent = '共 ' + sum.total + ' 题在库 · 今日到期 ' + sum.due + ' 题' + overTxt +
+      (sum.total ? ' · 平均复习间隔 ' + sum.avgIv + ' 天' : '');
+    var dl = $('dueList');
+    if (!due.length) {
+      dl.innerHTML = '<h3>今日到期重练</h3><div class="empty">暂无到期错题，安心练新题吧</div>';
+    } else {
+      var html = '<h3>今日到期重练（' + due.length + ' 题 · 已按薄弱程度排序）</h3>';
+      html += '<div class="actions" style="margin-top:8px"><button class="btn" id="wrongAllBtn">智能复习（优先最薄弱 ' + Math.min(due.length, 20) + ' 题）</button></div>';
+      html += due.map(function (id) { return wrongRow(id, true); }).join('');
+      dl.innerHTML = html;
+      $('wrongAllBtn').onclick = function () { startWrongSession(due.slice(0, 20)); };
+      bindWrongRows(dl, due);
+    }
+    var al = $('allWrongList');
+    if (!all.length) {
+      al.innerHTML = '<h3>未到期错题</h3><div class="empty">错题本还是空的，做错题后会自动进来</div>';
+    } else {
+      var rest = all.filter(function (id) { return due.indexOf(id) < 0; })
+        .sort(function (a, b) { return state.wrongbook[a].due < state.wrongbook[b].due ? -1 : 1; });
+      var html2 = '<h3>未到期错题（' + rest.length + '）· 距下次复习由近到远</h3>';
+      if (rest.length) { html2 += rest.map(function (id) { return wrongRow(id, false); }).join(''); bindWrongRows(al, rest); }
+      else html2 += '<div class="muted" style="margin-top:6px">全部错题均在上方到期区</div>';
+      al.innerHTML = html2;
+    }
+  }
+  function wrongRow(id, isDue) {
+    var q = C.findQ(BANKS, id); var wb = state.wrongbook[id];
+    if (!q) return '';
+    var od = C.dayDiff(wb.due, today); // >0 逾期天数，=0 今日到期，<0 距到期天数
+    var chipTxt = isDue ? (od > 0 ? '逾期 ' + od + ' 天' : '今日到期') : (Math.abs(od) <= 1 ? '明天复习' : Math.abs(od) + ' 天后复习');
+    return '<div class="wb-item" data-qid="' + esc(id) + '">' +
+      '<div class="meta"><div class="stem">' + esc(String(q.qno)) + '. ' + esc((q.stem || '(选词填空第' + q.qno + '空)').slice(0, 60)) + '</div>' +
+      esc(q.typeZh || '') + ' · ' + esc(C.findPaper(BANKS, id).id) + ' · 错 ' + wb.wrongCount + ' 次 · 下次到期 ' + wb.due + ' · 稳固度 ' + Math.round((wb.ease || 2.5) / 2.8 * 100) + '%</div>' +
+      '<span class="chip ' + (isDue ? 'due' : 'sched') + '">' + chipTxt + '</span>' +
+      '<button class="btn small">重练</button></div>';
+  }
+  function bindWrongRows(root, ids) {
+    Array.prototype.forEach.call(root.querySelectorAll('.wb-item'), function (row) {
+      row.querySelector('button').onclick = function () {
+        startWrongSession([row.getAttribute('data-qid')]);
+      };
+    });
+  }
+  // ---------- 写译自查：翻译踩分词覆盖 / 写作字数体检 ----------
+  var ESSAY_STOP = { the:1,a:1,an:1,of:1,to:1,and:1,in:1,that:1,is:1,was:1,for:1,it:1,with:1,as:1,be:1,by:1,this:1,which:1,or:1,from:1,at:1,on:1,but:1,not:1,are:1,were:1,been:1,have:1,has:1,had:1,will:1,would:1,can:1,could:1,than:1,then:1,more:1,most:1,such:1,into:1,over:1,under:1,between:1,also:1,its:1,their:1,there:1,when:1,while:1,where:1,who:1,whom:1,what:1,how:1,why:1,so:1,no:1,do:1,does:1,did:1,may:1,might:1,must:1,should:1,shall:1,about:1,after:1,before:1,during:1,since:1,until:1,both:1,each:1,other:1,some:1,any:1,all:1,only:1,own:1,same:1,too:1,very:1,just:1,if:1,because:1,these:1,those:1,they:1,them:1,we:1,you:1,he:1,she:1,his:1,her:1,our:1,us:1,me:1,my:1,your:1 };
+  function stemW(w) {
+    w = w.toLowerCase().replace(/[^a-z]/g, '');
+    if (w.length > 5 && w.slice(-3) === 'ing') w = w.slice(0, -3);
+    else if (w.length > 4 && w.slice(-2) === 'ed') w = w.slice(0, -2);
+    else if (w.length > 3 && w.slice(-1) === 's' && w.slice(-2) !== 'ss') w = w.slice(0, -1);
+    return w;
+  }
+  function runEssayCheck(it, paper, wt) {
+    var box = $('checkBox');
+    box.classList.add('show');
+    var txt = ($('essayTa').value || '').trim();
+    if (it.type === 'writing') {
+      var words = txt ? txt.split(/\s+/).filter(function (w) { return /[a-zA-Z]/.test(w); }) : [];
+      var n = words.length;
+      var tip = n === 0 ? '先在上方写下你的作文，再点体检。'
+        : (n < 150 ? '目前 ' + n + ' 词，离 150 词的及格线还差 ' + (150 - n) + ' 词，再展开一两个论点。'
+        : (n <= 200 ? n + ' 词，正好落在 150–200 词的要求区间，漂亮 ✓'
+        : n + ' 词，超纲了（要求 no more than 200），考场要删减，练练收束。'));
+      box.innerHTML = '<b>字数体检</b>：' + esc(tip) +
+        '<div class="muted" style="margin-top:4px">写作是主观题，机器不打分；写完点「查看参考范文」对照结构（观点句—例证—收尾）自查。</div>';
+      return;
+    }
+    // 翻译：从参考译文提取踩分词，比对覆盖率
+    var keys = [], seen = {};
+    (wt.sample || '').toLowerCase().split(/[^a-z]+/).forEach(function (w0) {
+      var w = stemW(w0);
+      if (w.length < 4 || ESSAY_STOP[w] || seen[w]) return;
+      seen[w] = 1; keys.push({ stem: w, orig: w0 });
+    });
+    keys = keys.slice(0, 24);
+    if (!txt) {
+      box.innerHTML = '<b>踩分词自查</b>：先在上方写出你的译文，再点自查——我会从参考译文中挑出关键踩分词，看你的译文覆盖了几个。';
+      return;
+    }
+    var mine = {};
+    txt.toLowerCase().split(/[^a-z]+/).forEach(function (w0) { var w = stemW(w0); if (w) mine[w] = 1; });
+    var hit = [], miss = [];
+    keys.forEach(function (k) { (mine[k.stem] ? hit : miss).push(k.orig); });
+    var pct = keys.length ? Math.round(hit.length / keys.length * 100) : 0;
+    var verdict = pct >= 80 ? '相当能打 👍' : (pct >= 60 ? '主干拿住了，细节词再抠一抠' : '关键词漏了不少，对照参考译文找找哪里没翻出来');
+    box.innerHTML = '<b>踩分词自查（' + esc(paper.id) + '）</b>：覆盖 ' + hit.length + '/' + keys.length + '（' + pct + '%）——' + esc(verdict) +
+      (miss.length ? '<div class="muted" style="margin-top:4px">未覆盖：' + miss.map(esc).join('、') + '</div>' : '<div class="muted" style="margin-top:4px">踩分词全覆盖，稳。</div>') +
+      '<div class="muted" style="margin-top:4px">说明：踩分词 = 参考译文里的关键内容词（每篇取 24 个）。这是自查参考，不是评分标准——阅卷还看句式和连贯，别为了堆词硬凑。</div>';
+  }
+
+  function startWrongSession(ids) {
+    // 做题顺序按（卷从近到远，卷内题号升序）排：同卷同材料相邻，
+    // 整组同屏渲染时材料/音频只出现一次；选题本身仍由「智能复习」按薄弱优先决定
+    ids = ids.slice().sort(function (a, b) {
+      var pa = C.findPaper(BANKS, a), pb = C.findPaper(BANKS, b);
+      if (!pa || !pb) return 0;
+      if (pa.id !== pb.id) return pa.id < pb.id ? 1 : -1;
+      return C.findQ(BANKS, a).qno - C.findQ(BANKS, b).qno;
+    });
+    var byType = {};
+    ids.forEach(function (id) { var t = C.findQ(BANKS, id).type; (byType[t] = byType[t] || []).push(id); });
+    // 混合题型组：renderGroup 会按题型/材料自动分段渲染
+    var first = Object.keys(byType)[0];
+    var item = { key: 'wrong-review', type: first, qids: byType[first], done: false, minutes: 0, isWrong: true };
+    Object.keys(byType).forEach(function (t) { if (t !== first) item.qids = item.qids.concat(byType[t]); });
+    startItem(item);
+  }
+
+  // ---------- 统计 ----------
+  function renderStat() {
+    var h = state.history[today];
+    $('statSummary').textContent = '累计 ' + totalMinutes() + ' 分钟';
+    var hm = C.heatmap(state.history, today, 84);
+    var run = 0; // 连击序号：打卡一天 +1，中断归零——格内数字直观可见
+    $('heatmap').innerHTML = hm.map(function (d) {
+      var cls = 'i', txt = '';
+      var on = d.done || d.floor;
+      if (on) {
+        run++;
+        txt = run;
+        cls += ' on';
+        if (d.floor) cls += ' floor';
+        else if (run >= 3) cls += ' f3';
+        else if (run === 2) cls += ' st2';
+        else cls += ' st1';
+      } else run = 0;
+      return '<i class="' + cls + '" title="' + d.date + ' ' + d.minutes + '分钟' + (d.floor ? '（忙日打卡）' : '') + (on ? ' · 连击第 ' + run + ' 天' : '') + '">' + txt + '</i>';
+    }).join('');
+    var totalQ = 0, totalR = 0;
+    Object.keys(state.papers).forEach(function (id) { totalQ += state.papers[id].seen; totalR += state.papers[id].right; });
+    $('statGrid').innerHTML =
+      statCell('🔥 连击', C.streak(state.history, today) + ' 天') +
+      statCell('今日', (h ? h.minutes : 0) + ' 分钟') +
+      statCell('累计做题', totalQ + ' 题') +
+      statCell('总体正确率', totalQ ? Math.round(totalR / totalQ * 100) + '%' : '—');
+    var acc = C.accuracyByType(state);
+    var rows = '<tr><th>题型</th><th>做题数</th><th>正确数</th><th>正确率</th></tr>';
+    ['listening', 'cloze', 'match', 'reading'].forEach(function (t) {
+      var a = acc[t];
+      rows += '<tr><td>' + C.TYPE_META[t].zh + '</td><td>' + (a ? a.seen : 0) + '</td><td>' + (a ? a.right : 0) + '</td><td>' +
+        (a && a.seen ? Math.round(a.right / a.seen * 100) + '%' : '—') + '</td></tr>';
+    });
+    $('accTable').innerHTML = rows;
+
+    // 考点维度正确率（薄弱考点排前面；只统计做过的，不新增练习量）
+    var byPt = C.accuracyByPoint(state, BANKS);
+    var ptRows = Object.keys(byPt).map(function (pt) {
+      var a = byPt[pt];
+      return { pt: pt, seen: a.seen, right: a.right, rate: a.seen ? a.right / a.seen : 0 };
+    }).filter(function (r) { return r.seen > 0; });
+    ptRows.sort(function (a, b) { return a.rate - b.rate; });
+    var ptHtml = ptRows.map(function (r) {
+      var pct = Math.round(r.rate * 100);
+      var mark = pct < 60 ? ' ⚠️' : (pct >= 85 ? ' ✓' : '');
+      return '<tr><td>' + esc(r.pt) + mark + '</td><td>' + r.seen + '</td><td>' + pct + '%</td></tr>';
+    }).join('');
+    $('ptTable').innerHTML = ptRows.length
+      ? '<tr><th>考点</th><th>做题数</th><th>正确率</th></tr>' + ptHtml
+      : '<tr><td class="muted">做题后会自动按考点统计正确率，薄弱考点排在最前 ⚠️</td></tr>';
+  }
+  function statCell(k, v) { return '<div class="stat-cell"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>'; }
+  function totalMinutes() {
+    var m = 0;
+    Object.keys(state.history).forEach(function (d) { m += state.history[d].minutes || 0; });
+    return m;
+  }
+
+  // ---------- 备份 ----------
+  $('exportBtn').onclick = function () {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cet6-backup-' + today + '.json';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+    state.lastBackup = today; save();
+    toast('已导出，请妥善保存这份备份文件');
+  };
+  $('importBtn').onclick = function () { $('importFile').click(); };
+  $('importFile').onchange = function () {
+    var f = this.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var s = JSON.parse(r.result);
+        if (!s || !s.version || !s.history) throw new Error('bad');
+        state = s; save();
+        toast('导入成功，打卡记录已恢复');
+        renderAll();
+      } catch (e) { toast('导入失败：不是有效的备份文件'); }
+    };
+    r.readAsText(f);
+    this.value = '';
+  };
+  var TYPE_ZH = { listening: '听力', cloze: '选词填空', match: '匹配', reading: '阅读', writing: '写作', translation: '翻译' };
+  var SHARE_ZH = { listeningSharedWith: '听力', clozeSharedWith: '选词填空', matchSharedWith: '匹配', readingSharedWith: '仔细阅读' };
+  $('bankInfo').innerHTML = BANKS.map(function (b) {
+    var cnt = {};
+    b.questions.forEach(function (q) { cnt[q.type] = (cnt[q.type] || 0) + 1; });
+    var dist = Object.keys(cnt).map(function (t) { return (TYPE_ZH[t] || t) + cnt[t]; }).join(' · ');
+    var shared = Object.keys(SHARE_ZH).filter(function (k) { return b[k]; })
+      .map(function (k) { return SHARE_ZH[k] + '与 ' + esc(b[k]) + ' 共用'; }).join('，');
+    var extra = shared ? '，' + shared + '，未重复收录' : '';
+    var head = b.questions.length ? b.questions.length + ' 题（' + dist + ' · 写作/翻译各1' + extra + '）'
+      : '纯共用卷（客观题全共用：' + (shared || '见同考期第1套') + '，仅写作/翻译独立）';
+    return '<div>📦 ' + esc(b.id) + ' — ' + head + '</div>';
+  }).join('') + '<div class="muted" style="margin-top:6px">以后新增真题卷：把生成的 bank JS 放入 bank/ 目录，并在本文件末尾加一行 &lt;script src="..."&gt; 即可。</div>';
+
+  // ---------- 导航 ----------
+  Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (b) {
+    b.onclick = function () {
+      Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      ['today', 'wrong', 'stat', 'backup'].forEach(function (p) {
+        $('page-' + p).style.display = (p === b.getAttribute('data-p')) ? '' : 'none';
+      });
+      if (b.getAttribute('data-p') === 'wrong') renderWrong();
+      if (b.getAttribute('data-p') === 'stat') renderStat();
+    };
+  });
+  $('quizBack').onclick = function () {
+    if (session && !session.submitted && Object.keys(session.draft || {}).length) { toast('草稿已保存，回来可续做'); }
+    quizExit();
+  };
+
+  function renderAll() {
+    renderToday(); renderWrong(); renderStat();
+  }
+  $('todayLabel').textContent = today;
+  bindUserChip();
+  renderAll();
+})();
+</script>
+
+<script>
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+</script>
+</body>
+</html>
