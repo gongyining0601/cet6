@@ -509,6 +509,20 @@
     });
     return runs;
   }
+  // 听力播放器：把懒笔记整卷页地址换成聚焦的听力专项页（内嵌 iframe 播放）；共用卷无地址时取共用源卷
+  function listeningUrlFor(paper, banks) {
+    var u = paper.listeningUrl;
+    if (!u && paper.listeningSharedWith) {
+      for (var i = 0; i < banks.length; i++) {
+        if (banks[i].id === paper.listeningSharedWith && banks[i].listeningUrl) { u = banks[i].listeningUrl; break; }
+      }
+    }
+    return u ? u.replace('/?f=w', '/listening/') : '';
+  }
+  function qnoRange(qs) {
+    var a = qs[0].qno, b = qs[qs.length - 1].qno;
+    return a === b ? '第 ' + a + ' 题' : '第 ' + a + '–' + b + ' 题';
+  }
   function renderGroup() {
     var s = session, it = s.item;
     var body = $('quizBody');
@@ -546,7 +560,12 @@
     var html = '';
     buildRuns(s.qids).forEach(function (run) {
       if (run.type === 'listening') {
-        html += '<div class="card linkline"><b>🎧 听力音频</b>：点<a href="' + esc(run.paper.listeningUrl) + '" target="_blank" rel="noopener">打开在线听力页</a>（新标签页播放），本组 ' + run.qs.length + ' 题共用这一段录音。</div>';
+        var lu = listeningUrlFor(run.paper, BANKS);
+        html += '<div class="card"><div class="row"><b>🎧 听力音频</b>' +
+          (lu ? '<a href="' + esc(lu) + '" target="_blank" rel="noopener" class="muted" style="font-size:12px">新窗口打开 ↗</a>' : '') + '</div>' +
+          '<div class="muted" style="font-size:12px;margin-bottom:8px">本组 ' + run.qs.length + ' 题共用这一段录音（' + qnoRange(run.qs) + '）' + (run.paper.listeningSharedWith ? ' · 听力与 ' + esc(run.paper.listeningSharedWith) + ' 共用' : '') + '</div>' +
+          (lu ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" title="听力播放器"></iframe>' : '<div class="empty">本卷听力页暂不可用，请在浏览器搜索该卷听力音频</div>') +
+          '</div>';
       } else if (run.type === 'cloze') {
         html += renderClozePassage(run.paper, run.qs);
         html += '<div class="wordbank">' + (run.qs[0].options || []).map(function (w) { return '<span>' + esc(w) + '</span>'; }).join('') + '</div>';
