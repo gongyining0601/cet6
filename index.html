@@ -669,6 +669,7 @@
     } else {
       $('groupDone').onclick = function () {
         if (it.isWrong) { toast('本轮错题重练完成'); quizExit(); }
+        else if (it.isPoint) { toast('薄弱考点专项练完成，考点正确率已更新'); quizExit(); }
         else { finishItem(it); quizExit(); }
       };
     }
@@ -878,6 +879,26 @@
     startItem(item);
   }
 
+  // P3 薄弱考点专项练：错题优先 + 新题补充，最多 6 题一组，直接开练（不入今日清单）
+  function startPointSession(pt) {
+    var ids = C.pointIds(BANKS, pt).filter(function (id) {
+      return state.wrongbook[id] || !state.papers[id]; // 在库错题或从未做过的题；做对并出库的不再重复练
+    });
+    if (!ids.length) { toast('该考点可练的题都做完了，去练别的考点吧'); return; }
+    ids.sort(function (a, b) {
+      var wa = state.wrongbook[a] ? 1 : 0, wb = state.wrongbook[b] ? 1 : 0;
+      if (wa !== wb) return wb - wa; // 错题排最前
+      var pa = C.findPaper(BANKS, a), pb = C.findPaper(BANKS, b);
+      if (pa.id !== pb.id) return pa.id < pb.id ? 1 : -1;
+      return C.findQ(BANKS, a).qno - C.findQ(BANKS, b).qno;
+    });
+    ids = ids.slice(0, 6);
+    var types = {};
+    ids.forEach(function (id) { var t = C.findQ(BANKS, id).type; types[t] = (types[t] || 0) + 1; });
+    var type = Object.keys(types).sort(function (a, b) { return types[b] - types[a]; })[0];
+    startItem({ key: 'point-' + pt, type: type, qids: ids, done: false, minutes: 0, isPoint: true, label: '薄弱点专项·' + pt });
+  }
+
   // ---------- 统计 ----------
   function renderStat() {
     var h = state.history[today];
@@ -920,6 +941,25 @@
     });
     $('accTable').innerHTML = rows;
 
+    // P3 估分卡：按已练客观题型得分率×满分权重折算，写译（主观题）不参与
+    var oldEst = $('estCard');
+    if (oldEst) oldEst.remove(); // renderStat 会被多次调用，先清旧卡再插
+    var est = C.estimateScore(state, BANKS);
+    var estCard = document.createElement('div');
+    estCard.id = 'estCard';
+    estCard.className = 'card';
+    estCard.innerHTML = '<h3>🧮 CET6 估算分</h3>' +
+      '<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:34px;font-weight:800">' + (est.covered ? est.score : '—') + '</span><span class="muted">/ 710</span></div>' +
+      (est.covered
+        ? '<div class="muted" style="margin-top:2px">基于 ' + est.parts.length + '/4 部分客观题（听力/选词/匹配/阅读），写译为主观题不计入；未练部分按同水平外推</div>' +
+          est.parts.map(function (p) {
+            var pct = Math.round(p.rate * 100);
+            return '<div style="margin-top:7px"><div class="row"><span class="muted">' + esc(p.zh) + ' · ' + p.seen + ' 题</span><b>' + pct + '%</b></div>' +
+              '<div class="prog"><i style="width:' + pct + '%"></i></div></div>';
+          }).join('')
+        : '<div class="muted">做几组客观题后，这里会按真题计分权重粗估你的分数</div>');
+    $('statGrid').insertAdjacentElement('afterend', estCard);
+
     // 考点维度正确率（薄弱考点排前面；只统计做过的，不新增练习量）
     var byPt = C.accuracyByPoint(state, BANKS);
     var ptRows = Object.keys(byPt).map(function (pt) {
@@ -932,9 +972,22 @@
       var mark = pct < 60 ? ' ⚠️' : (pct >= 85 ? ' ✓' : '');
       return '<tr><td>' + esc(r.pt) + mark + '</td><td>' + r.seen + '</td><td>' + pct + '%</td></tr>';
     }).join('');
+    // P3 薄弱考点专项练入口：练过 ≥3 题且正确率最低的考点一键开练
+    var wp = C.weakestPoint(state, BANKS, 3);
     $('ptTable').innerHTML = ptRows.length
       ? '<tr><th>考点</th><th>做题数</th><th>正确率</th></tr>' + ptHtml
       : '<tr><td class="muted">做题后会自动按考点统计正确率，薄弱考点排在最前 ⚠️</td></tr>';
+    var ptCard = $('ptTable').parentNode;
+    var oldBtn = ptCard.querySelector('.point-train');
+    if (oldBtn) oldBtn.remove();
+    if (wp) {
+      var btn = document.createElement('div');
+      btn.className = 'actions point-train';
+      btn.style.marginTop = '2px';
+      btn.innerHTML = '<button class="btn" id="pointTrainBtn">⚡ 专项练最薄弱考点：' + esc(wp.pt) + '（正确率 ' + Math.round(wp.rate * 100) + '%，练过 ' + wp.seen + ' 题）</button>';
+      ptCard.appendChild(btn);
+      ptCard.querySelector('#pointTrainBtn').onclick = function () { startPointSession(wp.pt); };
+    }
   }
   function statCell(k, v) { return '<div class="stat-cell"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>'; }
   function totalMinutes() {

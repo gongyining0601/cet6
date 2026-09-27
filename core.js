@@ -375,6 +375,51 @@
     return by;
   };
 
+  // ---------- P3 估分与薄弱点专项 ----------
+  // CET6 满分 710：听力 248.5（35%）、阅读 248.5（35%，= 选词 35.5 + 匹配 71 + 阅读 142）、写作 106.5、翻译 106.5
+  CORE.SCORE_WEIGHT = { listening: 248.5, cloze: 35.5, match: 71, reading: 142, writing: 106.5, translation: 106.5 };
+  // 估算分：按已练客观题型的得分率×权重折算，未练部分按同水平外推到 710（写译为主观题无客观判分，不参与）
+  CORE.estimateScore = function (state, banks) {
+    var acc = CORE.accuracyByType(state);
+    var got = 0, full = 0, parts = [];
+    ['listening', 'cloze', 'match', 'reading'].forEach(function (t) {
+      var w = CORE.SCORE_WEIGHT[t], a = acc[t];
+      if (a && a.seen) {
+        full += w; // 分母只累计练过的部分，未练部分视为同水平外推
+        var rate = a.right / a.seen;
+        got += rate * w;
+        parts.push({ type: t, zh: CORE.TYPE_META[t].zh, w: w, seen: a.seen, rate: rate });
+      }
+    });
+    var score = full > 0 ? Math.round(got / full * 710) : 0;
+    return { score: score, covered: full > 0, parts: parts };
+  };
+  // 最薄弱考点：练过 ≥ minSeen 题且正确率最低（并列时取做题多者，更可信）
+  CORE.weakestPoint = function (state, banks, minSeen) {
+    minSeen = minSeen || 3;
+    var by = CORE.accuracyByPoint(state, banks);
+    var best = null;
+    Object.keys(by).forEach(function (pt) {
+      var a = by[pt];
+      if (a.seen < minSeen) return;
+      var rate = a.right / a.seen;
+      if (!best || rate < best.rate || (rate === best.rate && a.seen > best.seen)) {
+        best = { pt: pt, seen: a.seen, right: a.right, rate: rate };
+      }
+    });
+    return best;
+  };
+  // 含指定考点的全部题 ID（供专项练选题）
+  CORE.pointIds = function (banks, pt) {
+    var out = [];
+    banks.forEach(function (b) {
+      (b.questions || []).forEach(function (q) {
+        if ((q.points || []).indexOf(pt) >= 0) out.push(q.id);
+      });
+    });
+    return out;
+  };
+
   // ---------- 判题 ----------
   CORE.judge = function (q, answer) {
     if (q.type === 'match') return answer === q.answer;
