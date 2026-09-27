@@ -6,7 +6,7 @@
      papers: { qid: { seen: n, wrong: n, right: n, lastAt: 'date', lastResult: 'right'|'wrong' } },
      wrongbook: { qid: { addedAt, box: n, due: 'YYYY-MM-DD', wrongCount: n } },
      plan: { date: 'YYYY-MM-DD', items: [ {key, type, qids, done, minutes} ] },
-     essays: { 'writing': {lastAt, text}, 'translation': {...} }  // 最近一次作文/翻译草稿
+     essays: { 'writing': {lastAt, text, rate?}, 'translation': {...} }  // 最近一次作文/翻译草稿；rate=自评分(0~1，可选)
    } */
 (function (root) {
   'use strict';
@@ -342,6 +342,8 @@
 
   // ---------- 存取 ----------
   CORE.STORAGE_KEY = 'cet6_p1_state_v1';
+  // P2-b：最近一次 normalizeState 在高亮恢复上截断掉的处数 { total, pids }（非持久化，仅本次载入有效）
+  CORE.hlTruncatedOnLoad = { total: 0, pids: {} };
   // 多账号：每个手机号一个独立存档，数据保存在各自设备本地
   CORE.stateKey = function (phone) { return CORE.STORAGE_KEY + '_' + phone; };
   CORE.loadState = function (storage, key, banks) {
@@ -389,7 +391,54 @@
   // ---------- P3 估分与薄弱点专项 ----------
   // CET6 满分 710：听力 248.5（35%）、阅读 248.5（35%，= 选词 35.5 + 匹配 71 + 阅读 142）、写作 106.5、翻译 106.5
   CORE.SCORE_WEIGHT = { listening: 248.5, cloze: 35.5, match: 71, reading: 142, writing: 106.5, translation: 106.5 };
-  // 估算分：按已练客观题型的得分率×权重折算，未练部分按同水平外推到 710（写译为主观题无客观判分，不参与）
+  // P0-b（第三轮）：客观题满分（听力+选词+匹配+阅读 = 248.5+35.5+71+142）与写译满分（106.5+106.5）
+  CORE.SCORE_OBJ_MAX = 497;
+  CORE.SCORE_WT_MAX = 213;
+  /* P0-b（第三轮）：写译的保守档次映射。
+     真实 CET6 的写作与翻译是"常模参照"的档次评分——阅卷先定档次再给分，另有字数/跑题/书写等扣分项，
+     实测普遍低于同一名考生的客观题正确率。旧实现让写译也吃客观题正确率，总分因此被系统性高估 20~40 分。
+     没有写译评分记录时按下面四档保守折算。 */
+  CORE.WT_TIERS = [
+    { min: 0.80, rate: 0.70, label: '客观题正确率 ≥80% → 写译按 70% 档' },
+    { min: 0.60, rate: 0.60, label: '客观题正确率 60–80% → 写译按 60% 档' },
+    { min: 0.40, rate: 0.50, label: '客观题正确率 40–60% → 写译按 50% 档' },
+    { min: -1, rate: 0.40, label: '客观题正确率 <40% → 写译按 40% 档' }
+  ];
+  CORE.wtTier = function (objRate) {
+    for (var i = 0; i < CORE.WT_TIERS.length; i++) {
+      if (objRate >= CORE.WT_TIERS[i].min) return CORE.WT_TIERS[i];
+    }
+    return CORE.WT_TIERS[CORE.WT_TIERS.length - 1];
+  };
+  /* 写译估分：优先用 state.essays 里的评分记录（rate，0~1，写作/翻译各一条，有则取平均），
+     没有评分记录时退回上面的保守档。返回值带 conservative 标志与 label，供 UI 如实标注"保守估算"。 */
+  CORE.writeTransEstimate = function (state, objRate) {
+    var es = (state && state.essays) || {};
+    var rs = [], names = [];
+    ['writing', 'translation'].forEach(function (k) {
+      var e = es[k];
+      if (e && typeof e.rate === 'number' && isFinite(e.rate)) {
+        rs.push(Math.min(1, Math.max(0, e.rate)));
+        names.push(k === 'writing' ? '写作' : '翻译');
+      }
+    });
+    var rate, conservative, source, label;
+    if (rs.length) {
+      rate = rs.reduce(function (a, b) { return a + b; }, 0) / rs.length;
+      conservative = false; source = 'recorded';
+      label = '写译按你的评分记录估算（' + names.join('+') + ' 平均）';
+    } else {
+      var tier = CORE.wtTier(objRate);
+      rate = tier.rate; conservative = true; source = 'tier';
+      label = '写译按保守档估算（' + tier.label + '）';
+    }
+    return { rate: rate, score: Math.round(rate * CORE.SCORE_WT_MAX * 10) / 10, max: CORE.SCORE_WT_MAX,
+      conservative: conservative, source: source, label: label };
+  };
+  /* 估分（P0-b 修正）：总分 = 客观题得分 + 写译估分，不再把整体归一化到 710。
+     客观题得分 = 加权正确率 × 497（未练的客观题型按同水平外推，这部分口径与旧实现一致）；
+     写译估分   = 213 × 写译得分率（无实测记录则走保守档）。
+     旧式子 (客观加权得分 / 已练权重) × 710 等价于把写译也按客观题正确率外推 —— 高估就是这么来的。 */
   CORE.estimateScore = function (state, banks) {
     var acc = CORE.accuracyByType(state);
     var got = 0, full = 0, parts = [];
@@ -402,8 +451,14 @@
         parts.push({ type: t, zh: CORE.TYPE_META[t].zh, w: w, seen: a.seen, rate: rate });
       }
     });
-    var score = full > 0 ? Math.round(got / full * 710) : 0;
-    return { score: score, covered: full > 0, parts: parts };
+    var covered = full > 0;
+    var objRate = covered ? got / full : 0;                              // 客观题加权得分率
+    var objScore = Math.round(objRate * CORE.SCORE_OBJ_MAX * 10) / 10;   // 客观题得分
+    var wt = CORE.writeTransEstimate(state, objRate);                    // 写译估分（保守档或实测）
+    var score = covered ? Math.round(objScore + wt.score) : 0;
+    return { score: score, covered: covered, parts: parts,
+      objScore: objScore, objRate: objRate, objMax: CORE.SCORE_OBJ_MAX,
+      writeTransEstimate: wt };
   };
   // 最薄弱考点：练过 ≥ minSeen 题且正确率最低（并列时取做题多者，更可信）
   CORE.weakestPoint = function (state, banks, minSeen) {
@@ -500,20 +555,34 @@
       });
     }
     // essays: 只保留字符串，限长 20000
+    // P0-b：rate = 写译自评分（0~1，可选）。旧存档没有这个字段；一旦有（自评/导入备份），
+    // 估分就走实测而不是保守档，所以这里必须保留，否则它会被清洗掉、永远用不上。
     st.essays = {};
     ['writing', 'translation'].forEach(function (k) {
       var e = s.essays && s.essays[k];
-      if (e && typeof e === 'object' && typeof e.text === 'string')
+      if (e && typeof e === 'object' && typeof e.text === 'string') {
         st.essays[k] = { lastAt: dateOr(e.lastAt, ''), text: e.text.slice(0, 20000) };
+        if (typeof e.rate === 'number' && isFinite(e.rate)) st.essays[k].rate = Math.min(1, Math.max(0, e.rate));
+      }
     });
     // hl: 只保留 pid->字符串数组
+    // P2-b（第三轮）：这里的 slice(0,50) 是"加载路径"的静默截断——交互路径（index.html 的 saveHl）
+    // 有 toast 提示，恢复路径以前没有，用户会觉得高亮"刷新后自己少了"。截断量记在
+    // CORE.hlTruncatedOnLoad 上，由 index.html 在启动/渲染该段时给出非阻塞提示。
     st.hl = {};
+    var hlCut = 0, hlCutPids = {};
     if (isObj(s.hl)) {
       Object.keys(s.hl).forEach(function (pid) {
         var a = s.hl[pid];
-        if (Array.isArray(a)) { var b = a.filter(function(x){return typeof x==='string';}).slice(0,50).map(function(x){return x.slice(0,200);}); if (b.length) st.hl[pid] = b; }
+        if (Array.isArray(a)) {
+          var ok = a.filter(function (x) { return typeof x === 'string'; });
+          var b = ok.slice(0, 50).map(function (x) { return x.slice(0, 200); });
+          if (b.length) st.hl[pid] = b;
+          if (ok.length > 50) { hlCut += ok.length - 50; hlCutPids[pid] = ok.length - 50; }
+        }
       });
     }
+    CORE.hlTruncatedOnLoad = { total: hlCut, pids: hlCutPids };
     // plan: 结构合法才保留（日期/版本在 ensurePlan 里还会再校验一次），否则置 null 强制重算
     st.plan = null;
     if (isObj(s.plan) && Array.isArray(s.plan.items)) {

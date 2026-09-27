@@ -148,6 +148,50 @@
   .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--toast); color:#fff; border-radius:999px; padding:8px 20px; font-size:13.5px; z-index:300; opacity:0; transition:opacity .25s; pointer-events:none; }
   .toast.show { opacity:.95; }
   .empty { text-align:center; color:var(--sub); padding:26px 0; }
+
+  /* ============ 第三轮修复：P1-a 深色模式对比度 / P2-a 触控目标 ============
+     实测工具 scripts/_r3_contrast_probe.js（浅/深两套主题各扫一遍，列出全部 <4.5:1 的文字元素）
+     与 scripts/test_round3_interaction.js 的 E 段。括号内为"修改前 → 修改后"实测对比度。
+
+     P1-a：下面这些组件的底色是硬编码的（不跟主题变量走），深浅两套主题都会命中，
+     所以两类规则一起给：浅色主题修文字色，深色主题再压深底色。 */
+
+  /* 热力格里的"连击第几天"数字。浅底 st1(#9ecbff) / st2(#5c9df7) 配白字只有 1.69 / 2.76:1，
+     改成深字后 9.30 / 5.70:1，格子底色不动。忙日格的琥珀渐变同样吃白字 1.67:1 → 深字 8.53:1
+     （渐变两主题一致，不必分主题）。f3 本来就是深蓝底，白字 5.38:1 达标，保持不动。 */
+  .heat i.st1, .heat i.st2 { color:#1c2333; }
+  .heat i.floor { color:#3a2503; }
+  /* 深色模式下上面那两个浅蓝底依旧生效（白字 1.69 / 2.76:1），换成同色系更深的三档 + 白字：
+     st1 #2563eb 5.17:1、st2 #1d4ed8 6.70:1、f3 #1e40af 8.72:1。 */
+  body.dark .heat i.st1 { background:#2563eb; color:#fff; }
+  body.dark .heat i.st2 { background:#1d4ed8; color:#fff; }
+  body.dark .heat i.f3 { background:#1e40af; color:#fff; }
+
+  /* 到期徽标 .chip.due：--bad(#dc2626) 压 --c10 底色 —— 深色 2.90:1 / 浅色 3.95:1 → 7.37 / 5.30:1 */
+  .chip.due { color:#b91c1c; }
+  body.dark .chip.due { color:#fca5a5; }
+
+  /* 判分结论 .verdict：答对 --ok(#16a34a) 深色 4.44:1、浅色 3.30:1 → 8.39 / 5.02:1；
+     答错 --bad 深色 3.03:1 → 5.29:1（浅色 4.83:1 本来达标） */
+  .verdict.ok { color:#15803d; }
+  body.dark .verdict.ok { color:#4ade80; }
+  body.dark .verdict.bad { color:#f87171; }
+
+  /* 计划条目左侧题型图标：深色下 --brand 压 --c2 只有 2.14:1 → 亮蓝 6.38:1；
+     已完成格的 ✓ 用 --ok 压 --c3，深色 2.77:1、浅色 3.00:1 → 5.23 / 4.57:1 */
+  .plan-item.done .ic { color:#15803d; }
+  body.dark .plan-item .ic { color:var(--brand-ink); }
+  body.dark .plan-item.done .ic { color:#4ade80; }
+
+  /* P2-a：可点目标 ≥44px（WCAG 2.5.5 建议的最小触控尺寸）。只抬高度、不动宽度与横向 padding，
+     所以换行与"元素不重叠"都不受影响。 */
+  .btn, .btn.small { min-height:44px; }
+  nav button { min-height:44px; }
+  #themeBtn { min-height:44px; }
+  .opt { min-height:44px; }
+  .qtop .back { min-height:44px; }
+  .hl-bar button { min-height:44px; }
+  .passage-toggle button { min-height:44px; }
 </style>
 </head>
 <body>
@@ -420,6 +464,9 @@
     // state 一律经 normalizeState 清洗（H-1）+ 幽灵 qid 清理（M-3/ N-SEC-3）：
     // 传入题库让 core 同时清掉 plan.items[].qids 里的幽灵题号（与 pruneGhosts 同口径）
     state = pruneGhosts(C.loadState(store, STATE_KEY, banksComplete ? BANKS : null));
+    // P2-b（第三轮）：加载路径（core.normalizeState）会把单段超过 50 处的高亮静默截断——
+    // 交互路径 saveHl 有 toast，恢复路径以前没有。这里把 core 记下的截断量接过来提示。
+    hlTruncated = (C.hlTruncatedOnLoad && C.hlTruncatedOnLoad.total) ? C.hlTruncatedOnLoad : { total: 0, pids: {} };
     // 把清洗结果立刻落盘（N-SEC-3/N-SEC-6）：否则会出现"界面已经干净、存档里还留着幽灵 qid / 遗留 key"，
     // 而落盘时机全看用户后面碰巧做了什么操作。
     save();
@@ -432,6 +479,11 @@
     bindTheme();
     bindUserChip();
     renderAll();
+    // P2-b：本次载入被截断过高亮就明说一次（toast 非阻塞，不拦任何操作）；
+    // 具体是哪一段被截断，会在那一段自己的高亮工具条下面再标一次（见 hlBar）。
+    if (hlTruncated.total > 0) {
+      toast('🖍 有 ' + hlTruncated.total + ' 处高亮超过单段上限 ' + HL_MAX + ' 处，已按顺序保留最靠前的部分');
+    }
   }
   // N-SEC-2：未登录不再 `return` 跳过初始化——绑定类语句必须照常执行，
   // 否则内存兜底模式下"原地登录"拿到的是一堆没绑事件的按钮（开始学习点不动）。渲染交给 startSession。
@@ -439,6 +491,8 @@
   var state = C.newState();
   var today = C.todayStr();
   var session = null;
+  // P2-b：本次载入被 core 截断掉的高亮处数 { total, pids }；非持久化，只描述"这次载入发生了什么"
+  var hlTruncated = { total: 0, pids: {} };
 
   function showLogin() {
     var mask = document.createElement('div');
@@ -716,6 +770,72 @@
     h.timedSec = (h.timedSec || 0) + it.timeSpentSec;
     save();
   }
+  /* ---------- P1-b（第三轮）答题浮层的焦点圈定 ----------
+     #quiz 是 position:fixed 铺满全屏的浮层，但背景 #app 仍在 Tab 序列里：只按 Tab 就能把焦点
+     走到被浮层完全遮住的按钮上（键盘用户看到的是"焦点凭空消失"）。这里做四件事：
+       1) 打开时记住触发元素，关闭时把焦点还回去；
+       2) 打开时给 #app 加 inert + aria-hidden，背景整块退出点击与辅助技术；
+       3) Tab / Shift+Tab 在浮层内循环（最后一个上按 Tab 回第一个，第一个上按 Shift+Tab 回最后一个）；
+       4) Esc 关闭浮层。
+     浮层内容每次作答都会重渲染，焦点会掉回 body —— 此时下一次 Tab 会被拉回浮层内第一个可聚焦元素。 */
+  var FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  var lastFocus = null; // 打开浮层前的焦点元素
+  function quizEl() { return $('quiz'); }
+  function quizOpen() { var q = quizEl(); return !!q && q.classList.contains('show'); }
+  function focusablesIn(root) {
+    var out = [];
+    if (!root) return out;
+    Array.prototype.forEach.call(root.querySelectorAll(FOCUSABLE), function (el) {
+      if (el.disabled) return;
+      if (el.closest('[hidden]') || el.closest('[aria-hidden="true"]')) return;
+      var cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return;
+      var r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return; // 不可见（display:none 的祖先 / 0 尺寸）不进 Tab 序列
+      out.push(el);
+    });
+    return out;
+  }
+  function bgInert(on) {
+    var app = $('app');
+    if (!app) return;
+    // inert 是标准做法（不可点、不可聚焦、对辅助技术隐藏）；老内核不认时用 aria-hidden 兜底。
+    if ('inert' in app) app.inert = !!on;
+    if (on) app.setAttribute('aria-hidden', 'true'); else app.removeAttribute('aria-hidden');
+  }
+  function quizFocusFirst() {
+    var list = focusablesIn(quizEl());
+    if (!list.length) return;
+    try { list[0].focus({ preventScroll: true }); } catch (e) { try { list[0].focus(); } catch (e2) { } }
+  }
+  function quizRestoreFocus() {
+    var el = lastFocus; lastFocus = null;
+    if (el && el.isConnected) { try { el.focus(); return; } catch (e) { } }
+    // 触发元素可能已被重渲染掉（退出时今日页整体重画）：退回当前可见页面的第一个可点元素
+    var app = $('app');
+    if (!app) return;
+    var shown = null;
+    ['today', 'wrong', 'stat', 'backup'].forEach(function (p) {
+      var s = $('page-' + p);
+      if (!shown && s && s.style.display !== 'none') shown = s;
+    });
+    var f = shown ? shown.querySelector(FOCUSABLE) : null;
+    if (f) { try { f.focus(); } catch (e) { } }
+  }
+  function onQuizKeydown(e) {
+    if (!quizOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); quizExit(); return; }
+    if (e.key !== 'Tab') return;
+    var list = focusablesIn(quizEl());
+    if (!list.length) return;
+    var first = list[0], last = list[list.length - 1];
+    var a = document.activeElement;
+    if (!a || !quizEl().contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+    if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+  }
+  document.addEventListener('keydown', onQuizKeydown, true);
+
   function startItem(it) {
     // N-UI-3：判分结果随清单条目持久化（it.judged/it.rightCount/it.answers）。刷新后重进同一组题，
     // 恢复的是"已判分 + 当时的作答"只读视图，而不是空白可重做的状态（旧行为：再交一次，papers[].seen 1→2）。
@@ -728,8 +848,11 @@
     s.limitSec = limitSecFor(it);
     s.leftSec = (it.timerLeft != null ? it.timerLeft : s.limitSec);
     s.overtime = s.leftSec <= 0;
+    lastFocus = document.activeElement; // P1-b：记住触发浮层的元素，关闭时还回去
     $('quiz').classList.add('show');
+    bgInert(true); // P1-b：背景整块 inert + aria-hidden，Tab 不再逃到被浮层遮住的按钮上
     renderGroup();
+    quizFocusFirst(); // P1-b：渲染完再把焦点移进浮层（渲染前浮层里还没有可聚焦元素）
     // 已判分的组进来只是回看：不再计时，也不再累计一次限时统计；
     // 其余情况必须照常启动——断点续做（it.timerLeft）也要从剩余秒数继续倒数，否则红灯不会亮
     if (judged) stopTimer(); else startTimer();
@@ -742,8 +865,10 @@
       save();
     }
     $('quiz').classList.remove('show');
+    bgInert(false); // P1-b：先撤掉背景 inert，再重渲染并把焦点还回去
     session = null;
     renderToday(); renderWrong(); renderStat();
+    quizRestoreFocus(); // P1-b：焦点还给触发元素；它已被重画掉时退回当前页第一个可点元素
   }
   function itOfSession() { return session ? session.item : null; }
   function saveDraft() { // 草稿即时存入清单条目（plan 在 state 内，持久化），退出浏览器可续做
@@ -980,10 +1105,19 @@
   }
 
   // ---------- P4 阅读划词高亮：选中文字 → 点「高亮」标黄；点已高亮词取消；随做题组持久化到 state.hl ----------
+  // P2-b（第三轮）：单段高亮上限。core.normalizeState 与这里的 saveHl 用同一个值。
+  var HL_MAX = 50;
+  // 本段在"这次载入"时被 core 截掉多少处（>0 才提示）；重新保存过就清掉，免得提示过时
+  function hlCutOf(pid) { return (hlTruncated.pids && hlTruncated.pids[pid]) || 0; }
+  function hlClearCut(pid) { if (hlTruncated.pids) delete hlTruncated.pids[pid]; }
   function hlBar(pid) {
+    var cut = hlCutOf(pid);
     return '<div class="hl-bar"><span>🖍 划选文字后点「高亮」，点击已高亮词可取消</span>' +
       '<button class="hl-add" data-pid="' + esc(pid) + '">高亮</button>' +
-      '<button class="hl-clear" data-pid="' + esc(pid) + '">清本段</button></div>';
+      '<button class="hl-clear" data-pid="' + esc(pid) + '">清本段</button></div>' +
+      // 单独一行小字（不是塞进上面那一行 flex），窄屏也只是换行，不会横向溢出
+      (cut ? '<div class="muted" style="margin:-8px 0 12px">⚠️ 本段原有的高亮有 ' + cut + ' 处超出单段上限 ' + HL_MAX + ' 处，' +
+        '本次载入按顺序保留了最靠前的 ' + HL_MAX + ' 处（超出的部分不会写回存档）</div>' : '');
   }
   function passageOfPid(pid) {
     var ps = $('quizBody').querySelectorAll('.passage');
@@ -995,9 +1129,8 @@
     var p = passageOfPid(pid);
     var texts = [];
     if (p) Array.prototype.forEach.call(p.querySelectorAll('mark.hl'), function (m) { texts.push(m.textContent); });
-    // N-UI-6：单段高亮上限 50（core 侧 normalizeState 同样 slice(0,50)）。超了就明说并保留最靠前的 50 处，
+    // N-UI-6：单段高亮上限 HL_MAX（core 侧 normalizeState 同样 slice(0,50)）。超了就明说并保留最靠前的那些，
     // 不再让后面的高亮"看起来加了、刷新就没了"。同时清掉多出来的 <mark>，画面与存档保持一致。
-    var HL_MAX = 50;
     if (texts.length > HL_MAX) {
       var extra = texts.length - HL_MAX;
       texts = texts.slice(0, HL_MAX);
@@ -1005,6 +1138,7 @@
       toast('本段高亮已达上限 ' + HL_MAX + ' 处，本次多出的 ' + extra + ' 处没有保存');
     }
     if (texts.length) state.hl[pid] = texts; else delete state.hl[pid];
+    hlClearCut(pid); // P2-b：本段已按当前内容重新落盘，载入时那条"被截断"提示不用再挂着
     save();
   }
   // 恢复持久化的高亮：在段落文本里按原文定位首个匹配并包 <mark>
@@ -1285,23 +1419,31 @@
     });
     $('accTable').innerHTML = rows;
 
-    // P3 估分卡：按已练客观题型得分率×满分权重折算，写译（主观题）不参与
+    // P0-b（第三轮）估分卡：客观题得分与写译估分分开显示，写译如实标注"保守档"。
+    // 旧卡把写译也按客观题正确率外推（整体归一化到 710），总分高估 20~40 分。
     var oldEst = $('estCard');
     if (oldEst) oldEst.remove(); // renderStat 会被多次调用，先清旧卡再插
     var est = C.estimateScore(state, BANKS);
+    var wt = est.writeTransEstimate || { score: 0, max: C.SCORE_WT_MAX, rate: 0, conservative: true, label: '' };
+    var estBody = est.covered
+      ? '<div class="muted" style="margin-top:4px">客观题（听力/选词/匹配/阅读）<b>' + est.objScore + '</b> / ' + est.objMax +
+        '　+　写译（写作+翻译）<b>' + wt.score + '</b> / ' + wt.max + '</div>' +
+        '<div class="muted" style="margin-top:6px">' + esc(wt.label) +
+        (wt.conservative ? '——写译是常模参照的档次评分，通常低于客观题正确率，这里不按客观正确率外推' : '') + '</div>' +
+        '<div class="muted" style="margin-top:2px">基于 ' + est.parts.length + '/4 部分客观题；未练的客观题型按同水平外推</div>' +
+        est.parts.map(function (p) {
+          var pct = Math.round(p.rate * 100);
+          return '<div style="margin-top:7px"><div class="row"><span class="muted">' + esc(p.zh) + ' · ' + esc(p.seen) + ' 题</span><b>' + pct + '%</b></div>' +
+            '<div class="prog"><i style="width:' + pct + '%"></i></div></div>';
+        }).join('')
+      : '<div class="muted">做几组客观题后，这里会按真题计分权重粗估你的分数</div>';
     var estCard = document.createElement('div');
     estCard.id = 'estCard';
     estCard.className = 'card';
     estCard.innerHTML = '<h3>🧮 CET6 估算分</h3>' +
       '<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:34px;font-weight:800">' + (est.covered ? est.score : '—') + '</span><span class="muted">/ 710</span></div>' +
-      (est.covered
-        ? '<div class="muted" style="margin-top:2px">基于 ' + est.parts.length + '/4 部分客观题（听力/选词/匹配/阅读），写译为主观题不计入；未练部分按同水平外推</div>' +
-          est.parts.map(function (p) {
-            var pct = Math.round(p.rate * 100);
-            return '<div style="margin-top:7px"><div class="row"><span class="muted">' + esc(p.zh) + ' · ' + esc(p.seen) + ' 题</span><b>' + pct + '%</b></div>' +
-              '<div class="prog"><i style="width:' + pct + '%"></i></div></div>';
-          }).join('')
-        : '<div class="muted">做几组客观题后，这里会按真题计分权重粗估你的分数</div>');
+      (est.covered ? '<div style="margin-top:2px"><span class="badge review">写译按保守档估算</span></div>' : '') +
+      estBody;
     $('statGrid').insertAdjacentElement('afterend', estCard);
 
     // 考点维度正确率（薄弱考点排前面；只统计做过的，不新增练习量）
