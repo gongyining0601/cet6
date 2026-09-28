@@ -44,7 +44,7 @@
   CORE.PLAN_TARGET = 25;
   CORE.PLAN_CAP = 40;
   CORE.REVIEW_CAP = 10;
-  CORE.PLAN_VERSION = 3; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力）
+  CORE.PLAN_VERSION = 4; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组，其余额度混入其他题型，避免"今日全听力"）
 
   // ---------- 题库索引 ----------
   CORE.allQuestions = function (banks) {
@@ -301,11 +301,22 @@
         break;
       }
     }
+    // 当日已装听力组数：3a 保底 1 组（含复习组听力），while 最多补到 2 组/天
+    var listeningCnt = items.filter(function (it) { return it.type === 'listening'; }).length;
     while (acc < target && i < units.length) {
       var u = units[i++];
       var allSeen = u.qids.every(function (id) { return state.papers[id]; });
       if (allSeen) continue;
       if (u.qids.some(function (id) { return planIds[id]; })) continue; // 今日复习已含
+      // P7-b（v4）：每日听力 1~2 组——3a 已保底 1 组，这里最多再补 1 组。
+      // 若不加限制，一卷听力拆成的 5 组（每组仅 5~6 分钟）会恰好填满每日 25 分钟目标，
+      // 造成"今日全听力"、其他题型排不进来；若只允许 1 组，听力（占全库 37%）又会
+      // 拖慢整体排期（154 天 → 343 天）。1~2 组/天既保证听力连续性，又混入其他题型，
+      // 全库排期约回到 160~180 天。
+      if (u.type === 'listening') {
+        if (listeningCnt >= 2) continue;
+        listeningCnt++;
+      }
       if (u.min > cap - acc) break; // 超上限，今天到此为止
       items.push({ key: 'new-' + u.type + '-' + u.paperId + '-' + u.qnos[0], type: u.type, qids: u.qids.slice(), paperId: u.paperId, label: u.label, done: false, minutes: 0 });
       u.qids.forEach(function (id) { planIds[id] = 1; });
