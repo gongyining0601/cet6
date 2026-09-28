@@ -44,7 +44,7 @@
   CORE.PLAN_TARGET = 25;
   CORE.PLAN_CAP = 40;
   CORE.REVIEW_CAP = 10;
-  CORE.PLAN_VERSION = 5; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组，其余额度混入其他题型，避免"今日全听力"）
+  CORE.PLAN_VERSION = 6; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组混入其他题型；v5=meta 形态按 order 新→旧展开；v6=两流配速协同+同日卷号稳定排序）
 
   // ---------- 题库索引 ----------
   CORE.allQuestions = function (banks) {
@@ -288,6 +288,8 @@
       target -= wmin; cap -= wmin;
     }
     // 3) 新题完整单元装包（最近考期优先，已做完的整单元跳过）
+    //    P0（v6）：两流配速协同——听力/客观题按剩余量比例分配每日额度，
+    //    消除"客观题先耗尽→尾段纯听力清单"；日末再按卷号稳定排序，消除同日卡片卷号回头。
     var acc = 0, i = 0;
     // 3a) 每日保底一组听力：听力是持续性技能，一天不练就生疏。
     //     部分卷（27 套第3套等）无听力题，纯贪心会连续多日排不进听力，这里显式保证。
@@ -305,31 +307,75 @@
         break;
       }
     }
-    // 当日已装听力组数：3a 保底 1 组（含复习组听力），while 最多补到 2 组/天
-    var listeningCnt = items.filter(function (it) { return it.type === 'listening'; }).length;
+    // 配速：统计今日仍待排（未做完且未装入今日清单）的听力/客观题组数，
+    // 按"客观题每日 2 组排完所需天数"分摊剩余听力，使两流同日耗尽、尾段不再出现纯听力。
+    function remTypeCnt(type) {
+      var n = 0;
+      for (var r = 0; r < units.length; r++) {
+        var uu = units[r];
+        if (uu.type !== type) continue;
+        if (uu.qids.every(function (id) { return state.papers[id]; })) continue;
+        if (uu.qids.some(function (id) { return planIds[id]; })) continue;
+        n++;
+      }
+      return n;
+    }
+    var Lrem = remTypeCnt('listening');
+    var Orem = remTypeCnt('cloze') + remTypeCnt('match') + remTypeCnt('reading');
+    var OBJ_PER_DAY = 3;                     // 客观题目标：每日至多 3 个完整单元（保证首日含 听力+选词+匹配+阅读 全 4 类题型）
+    var objDays = Orem === 0 ? 1 : Math.max(1, Math.ceil(Orem / OBJ_PER_DAY));
+    var listenCap = Orem === 0 ? 4 : Math.max(1, Math.min(4, Math.round(Lrem / objDays))); // 今日听力目标组数（2~3 浮动）
+    if (dow === 6) listenCap = Math.min(listenCap, 1); // 周六：写译已占当日额度，只保底 1 组听力，把配额留给客观题（避免"纯听力+写译"）
+    var objCap = Orem === 0 ? 0 : OBJ_PER_DAY;  // 今日客观题目标组数
+    var listeningCnt = items.filter(function (it) { return it.type === 'listening'; }).length;   // 含复习+3a
+    var objCnt = items.filter(function (it) { return it.type === 'cloze' || it.type === 'match' || it.type === 'reading'; }).length; // 含复习组客观题
     while (acc < target && i < units.length) {
       var u = units[i++];
       var allSeen = u.qids.every(function (id) { return state.papers[id]; });
       if (allSeen) continue;
-      if (u.qids.some(function (id) { return planIds[id]; })) continue; // 今日复习已含
-      // P7-b（v4）：每日听力 1~2 组——3a 已保底 1 组，这里最多再补 1 组。
-      // 若不加限制，一卷听力拆成的 5 组（每组仅 5~6 分钟）会恰好填满每日 25 分钟目标，
-      // 造成"今日全听力"、其他题型排不进来；若只允许 1 组，听力（占全库 37%）又会
-      // 拖慢整体排期（154 天 → 343 天）。1~2 组/天既保证听力连续性，又混入其他题型，
-      // 全库排期约回到 160~180 天。
+      if (u.qids.some(function (id) { return planIds[id]; })) continue; // 今日复习/3a 已含
+      // 配速上限：听力 2~3 组/天（客观题越少越多），客观题 2 组/天，
+      // 保证每日 2 听力 + 2 客观题 ≈ 25~33 分钟，两流同步推进、无纯听力日。
       if (u.type === 'listening') {
-        if (listeningCnt >= 2) continue;
+        if (listeningCnt >= listenCap) continue;
         listeningCnt++;
+      } else if (u.type === 'cloze' || u.type === 'match' || u.type === 'reading') {
+        if (objCap > 0 && objCnt >= objCap) continue; // 客观题配额已满，留到明天
+        objCnt++;
       }
-      if (u.min > cap - acc) break; // 超上限，今天到此为止
+      if (u.min > cap - acc) continue; // 放不下的留到明天（继续找更小的单元）
       items.push({ key: 'new-' + u.type + '-' + u.paperId + '-' + u.qnos[0], type: u.type, qids: u.qids.slice(), paperId: u.paperId, label: u.label, done: false, minutes: 0 });
       u.qids.forEach(function (id) { planIds[id] = 1; });
       acc += u.min;
+    }
+    // 保底补足到 target：受配速上限约束未到 25 分钟时（如客观题极少的日子），
+    // 用剩余任意题型（含超出当日配速上限的听力）补足到 25 分钟或排空，避免时长不足。
+    i = 0;
+    while (acc < target && i < units.length) {
+      var u3 = units[i++];
+      if (u3.qids.every(function (id) { return state.papers[id]; })) continue;
+      if (u3.qids.some(function (id) { return planIds[id]; })) continue;
+      if (u3.min > cap - acc) continue; // 放不下的留到明天
+      items.push({ key: 'new-' + u3.type + '-' + u3.paperId + '-' + u3.qnos[0], type: u3.type, qids: u3.qids.slice(), paperId: u3.paperId, label: u3.label, done: false, minutes: 0 });
+      u3.qids.forEach(function (id) { planIds[id] = 1; });
+      acc += u3.min;
     }
     // N-SEC-3：兜底——没有任何题可练的组不进清单（写译组 qids 本来就为空，保留）
     items = items.filter(function (it) {
       return (it.qids && it.qids.length) || it.type === 'writing' || it.type === 'translation';
     });
+    // R4-M1（v6）：同日卡片按卷号新→旧、同卷按 听力→选词→匹配→阅读 稳定排序，
+    // 消除"新→旧→新"卷号回头（此前保底听力插队导致 19/70 卷出现同日回退）。
+    var typeRank = { listening: 0, cloze: 1, match: 2, reading: 3 };
+    var reviewItems = items.filter(function (it) { return it.key.indexOf('review-') === 0; });
+    var restItems = items.filter(function (it) { return it.key.indexOf('review-') !== 0; });
+    restItems.sort(function (a, b) {
+      if (a.paperId !== b.paperId) return a.paperId > b.paperId ? -1 : 1; // 卷号新→旧（字典序可比较）
+      var ta = typeRank[a.type] != null ? typeRank[a.type] : 99;
+      var tb = typeRank[b.type] != null ? typeRank[b.type] : 99;
+      return ta - tb;
+    });
+    items = reviewItems.concat(restItems);
     return { date: dateStr, v: CORE.PLAN_VERSION, items: items };
   };
   function C_findQno(banks, qid) {
