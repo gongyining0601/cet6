@@ -44,7 +44,7 @@
   CORE.PLAN_TARGET = 25;
   CORE.PLAN_CAP = 40;
   CORE.REVIEW_CAP = 10;
-  CORE.PLAN_VERSION = 4; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组，其余额度混入其他题型，避免"今日全听力"）
+  CORE.PLAN_VERSION = 5; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组，其余额度混入其他题型，避免"今日全听力"）
 
   // ---------- 题库索引 ----------
   CORE.allQuestions = function (banks) {
@@ -223,7 +223,11 @@
     if (CORE.isFullBank(src)) return CORE.unitList(src);
     var units = [];
     var papers = (src && src.papers) || {};
-    Object.keys(papers).forEach(function (id) {
+    // P7-c（v5）：meta 形态必须按 src.order（新→旧，与全量形态 paperOrder 同口径）展开。
+    // meta.js 的 papers 键序是旧→新（生成器按读取顺序），直接 Object.keys 会让
+    // 排期从最老的 2015 卷开始，用户会看到"题目时间不是新到旧"。
+    var order = (src && Array.isArray(src.order)) ? src.order : Object.keys(papers);
+    order.forEach(function (id) {
       var p = papers[id];
       if (p && Array.isArray(p.units)) units = units.concat(p.units);
     });
