@@ -5,8 +5,8 @@
  * 不阻塞首屏渲染，做题时的动态加载（fetch 优先命中缓存）与离线全库可用保持不变。
  * 更新应用时改下面的 VERSION 即可让所有客户端刷新缓存。
  */
-var VERSION = 'cet6-v17';
-var SHELL = ['./', './index.html', './core.js', './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js'];
+var VERSION = 'cet6-v18';
+var SHELL = ['./', './index.html', './core.js?v=4', './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js'];
 /* 卷清单来自 meta.js（顶层 IIFE 挂到 self.CET6_META）：install 时把全部卷预缓存。
    meta.js 缺失时退化为只缓存外壳（页面会由 index.html 的 meta 完整性检查给出错误提示）。 */
 try { importScripts('./bank/meta.js'); } catch (e) { }
