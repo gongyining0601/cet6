@@ -44,7 +44,7 @@
   CORE.PLAN_TARGET = 25;
   CORE.PLAN_CAP = 40;
   CORE.REVIEW_CAP = 10;
-  CORE.PLAN_VERSION = 6; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v3=每日保底一组听力；v4=每日听力 1~2 组混入其他题型；v5=meta 形态按 order 新→旧展开；v6=两流配速协同+同日卷号稳定排序）
+  CORE.PLAN_VERSION = 7; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v7=主题型日+听力每天保底+听力组按篇对齐；v6=两流配速协同+同日卷号稳定排序）
 
   // ---------- 题库索引 ----------
   CORE.allQuestions = function (banks) {
@@ -179,7 +179,14 @@
   CORE.paperOrder = function (banks) { // 最近考期优先
     return banks.slice().sort(function (a, b) { return a.id < b.id ? 1 : (a.id > b.id ? -1 : 0); });
   };
-  var LISTEN_SECTIONS = [[1, 8, '长对话'], [9, 15, '篇章'], [16, 25, '讲座']];
+  // v7（R5）：听力"篇对齐"——每卷听力按真实音频"篇"切组（Section A 2 篇、B 2 篇、C 3 篇），
+  // 使"一天排的听力组 = 要播的音频篇"，与原生播放器的「播放本篇」1:1 对应。
+  // 篇边界与实测听力页 ListeningAudioBar 的 pieces 完全一致：1-4 / 5-8 / 9-11 / 12-15 / 16-18 / 19-21 / 22-25。
+  var LISTEN_PIECES = [
+    [1, 4, 'Section A·第1篇'], [5, 8, 'Section A·第2篇'],
+    [9, 11, 'Section B·第1篇'], [12, 15, 'Section B·第2篇'],
+    [16, 18, 'Section C·第1篇'], [19, 21, 'Section C·第2篇'], [22, 25, 'Section C·第3篇']
+  ];
   function mkUnit(paper, type, qs, label) {
     return {
       paperId: paper.id, type: type, label: label,
@@ -193,12 +200,9 @@
     var units = [];
     CORE.paperOrder(banks).forEach(function (p) {
       var qs = (p.questions || []).slice().sort(function (a, b) { return a.qno - b.qno; });
-      LISTEN_SECTIONS.forEach(function (sec) {
-        var lst = qs.filter(function (q) { return q.type === 'listening' && q.qno >= sec[0] && q.qno <= sec[1]; });
-        for (var i = 0; i < lst.length; i += 4) {
-          var chunk = lst.slice(i, i + 4);
-          units.push(mkUnit(p, 'listening', chunk, '听力·' + sec[2] + ' ' + chunk[0].qno + '-' + chunk[chunk.length - 1].qno));
-        }
+      LISTEN_PIECES.forEach(function (pc) {
+        var lst = qs.filter(function (q) { return q.type === 'listening' && q.qno >= pc[0] && q.qno <= pc[1]; });
+        if (lst.length) units.push(mkUnit(p, 'listening', lst, '听力·' + pc[2] + ' ' + lst[0].qno + '-' + lst[lst.length - 1].qno));
       });
       var cl = qs.filter(function (q) { return q.type === 'cloze'; });
       if (cl.length) units.push(mkUnit(p, 'cloze', cl, '选词填空·整篇 26-35'));
@@ -288,28 +292,13 @@
       target -= wmin; cap -= wmin;
     }
     // 3) 新题完整单元装包（最近考期优先，已做完的整单元跳过）
-    //    P0（v6）：两流配速协同——听力/客观题按剩余量比例分配每日额度，
-    //    消除"客观题先耗尽→尾段纯听力清单"；日末再按卷号稳定排序，消除同日卡片卷号回头。
+    //    v7（R5）：主题型日 + 听力每天保底，两流配速协同收官——
+    //    每天 1 个"主题型"（剩余耗时最多的题型）占当日大头，配少量辅题型补足到 25~40 分钟；
+    //    听力每天保底（非听力主日 2 篇 / 听力主日 3 篇），既是天天练、又让听力成为练得最多的题型；
+    //    日末按卷号新→旧、同卷按题型稳定排序，消除同日卡片卷号回头。目标 ≤154 天、3315 全题排完。
     var acc = 0, i = 0;
-    // 3a) 每日保底一组听力：听力是持续性技能，一天不练就生疏。
-    //     部分卷（27 套第3套等）无听力题，纯贪心会连续多日排不进听力，这里显式保证。
-    var hasListening = items.some(function (it) { return it.type === 'listening'; });
-    if (!hasListening) {
-      for (var li = 0; li < units.length; li++) {
-        var lu = units[li];
-        if (lu.type !== 'listening') continue;
-        if (lu.qids.every(function (id) { return state.papers[id]; })) continue;
-        if (lu.qids.some(function (id) { return planIds[id]; })) continue;
-        if (lu.min > cap) continue;
-        items.push({ key: 'new-' + lu.type + '-' + lu.paperId + '-' + lu.qnos[0], type: lu.type, qids: lu.qids.slice(), paperId: lu.paperId, label: lu.label, done: false, minutes: 0 });
-        lu.qids.forEach(function (id) { planIds[id] = 1; });
-        acc += lu.min;
-        break;
-      }
-    }
-    // 配速：统计今日仍待排（未做完且未装入今日清单）的听力/客观题组数，
-    // 按"客观题每日 2 组排完所需天数"分摊剩余听力，使两流同日耗尽、尾段不再出现纯听力。
-    function remTypeCnt(type) {
+    // 3a) 主题型 = 今日剩余分钟数最多的题型（听力因题量大、耗时长，通常是主题型）
+    function remUnitCnt(type) {
       var n = 0;
       for (var r = 0; r < units.length; r++) {
         var uu = units[r];
@@ -320,36 +309,52 @@
       }
       return n;
     }
-    var Lrem = remTypeCnt('listening');
-    var Orem = remTypeCnt('cloze') + remTypeCnt('match') + remTypeCnt('reading');
-    var OBJ_PER_DAY = 3;                     // 客观题目标：每日至多 3 个完整单元（保证首日含 听力+选词+匹配+阅读 全 4 类题型）
+    var theme = 'listening';
+    (function () {
+      var rem = { listening: 0, cloze: 0, match: 0, reading: 0 };
+      for (var r = 0; r < units.length; r++) {
+        var uu = units[r];
+        if (uu.qids.every(function (id) { return state.papers[id]; })) continue;
+        if (uu.qids.some(function (id) { return planIds[id]; })) continue;
+        rem[uu.type] += uu.min;
+      }
+      var best = 'listening', bm = -1;
+      ['cloze', 'match', 'reading', 'listening'].forEach(function (t) { if (rem[t] > bm) { bm = rem[t]; best = t; } });
+      theme = bm > 0 ? best : 'listening';
+    })();
+    // 3b) 配速：按"客观题每日 3 组排完所需天数"分摊剩余听力，使两流同日耗尽、尾段不再纯听力
+    var Lrem = remUnitCnt('listening');
+    var Orem = remUnitCnt('cloze') + remUnitCnt('match') + remUnitCnt('reading');
+    var OBJ_PER_DAY = 3;                     // 客观题目标：每日至多 3 个完整单元
     var objDays = Orem === 0 ? 1 : Math.max(1, Math.ceil(Orem / OBJ_PER_DAY));
-    var listenCap = Orem === 0 ? 4 : Math.max(1, Math.min(4, Math.round(Lrem / objDays))); // 今日听力目标组数（2~3 浮动）
-    if (dow === 6) listenCap = Math.min(listenCap, 1); // 周六：写译已占当日额度，只保底 1 组听力，把配额留给客观题（避免"纯听力+写译"）
-    var objCap = Orem === 0 ? 0 : OBJ_PER_DAY;  // 今日客观题目标组数
-    var listeningCnt = items.filter(function (it) { return it.type === 'listening'; }).length;   // 含复习+3a
-    var objCnt = items.filter(function (it) { return it.type === 'cloze' || it.type === 'match' || it.type === 'reading'; }).length; // 含复习组客观题
+    var listenCap = Orem === 0 ? 4 : Math.max(1, Math.min(4, Math.round(Lrem / objDays))); // 今日听力目标篇数（~2~4）
+    if (dow === 6) listenCap = Math.min(listenCap, 2); // 周六：写译已占当日额度，听力保底 2 篇
+    var objCap = Orem === 0 ? 0 : OBJ_PER_DAY;         // 今日客观题目标组数
+    // 3c) 主题型 / 辅题型配额：主题型每日至多 2 个完整单元（占当日大头），其他客观题共享 1 个（补足）
+    var themeCnt = 0, otherObjCnt = 0;
+    var listeningCnt = items.filter(function (it) { return !it.review && it.type === 'listening'; }).length; // 含 3a 之前无，此处从 0 计
+    var objTotalCnt = items.filter(function (it) { return !it.review && (it.type === 'cloze' || it.type === 'match' || it.type === 'reading'); }).length;
     while (acc < target && i < units.length) {
       var u = units[i++];
       var allSeen = u.qids.every(function (id) { return state.papers[id]; });
       if (allSeen) continue;
-      if (u.qids.some(function (id) { return planIds[id]; })) continue; // 今日复习/3a 已含
-      // 配速上限：听力 2~3 组/天（客观题越少越多），客观题 2 组/天，
-      // 保证每日 2 听力 + 2 客观题 ≈ 25~33 分钟，两流同步推进、无纯听力日。
+      if (u.qids.some(function (id) { return planIds[id]; })) continue; // 今日复习已含
       if (u.type === 'listening') {
-        if (listeningCnt >= listenCap) continue;
+        if (listeningCnt >= listenCap) continue; // 听力配额满，留到明天
         listeningCnt++;
-      } else if (u.type === 'cloze' || u.type === 'match' || u.type === 'reading') {
-        if (objCap > 0 && objCnt >= objCap) continue; // 客观题配额已满，留到明天
-        objCnt++;
+      } else {
+        if (objCap > 0 && objTotalCnt >= objCap) continue; // 客观题配额满
+        if (u.type === theme) { if (themeCnt >= 2) continue; themeCnt++; }   // 主题型 2 组
+        else { if (otherObjCnt >= 1) continue; otherObjCnt++; }             // 辅题型 1 组
+        objTotalCnt++;
       }
       if (u.min > cap - acc) continue; // 放不下的留到明天（继续找更小的单元）
       items.push({ key: 'new-' + u.type + '-' + u.paperId + '-' + u.qnos[0], type: u.type, qids: u.qids.slice(), paperId: u.paperId, label: u.label, done: false, minutes: 0 });
       u.qids.forEach(function (id) { planIds[id] = 1; });
       acc += u.min;
     }
-    // 保底补足到 target：受配速上限约束未到 25 分钟时（如客观题极少的日子），
-    // 用剩余任意题型（含超出当日配速上限的听力）补足到 25 分钟或排空，避免时长不足。
+    // 3d) 保底补足到 target：受配额上限约束未到 25 分钟时（如某题型剩余极少的日子），
+    //     用剩余任意题型（含超出当日配额的听力/客观题）补足到 25 分钟或排空，避免时长不足。
     i = 0;
     while (acc < target && i < units.length) {
       var u3 = units[i++];

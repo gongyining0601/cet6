@@ -101,6 +101,23 @@
   .opt:disabled { cursor:default; }
   .wordbank { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
   .wordbank span { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 10px; font-size:13.5px; }
+  /* R5-选词方案2：词库点选填空。词库是可点的词块，空格是可点的填空位。 */
+  .wb-chip { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 9px; font-size:13px; cursor:pointer; color:inherit; }
+  .wb-chip:hover { border-color:var(--brand); background:var(--c2); }
+  .wb-chip:disabled { cursor:default; opacity:.55; }
+  .cloze-slot { display:inline-block; min-width:96px; max-width:100%; text-align:center; background:var(--c6); border:1.5px dashed var(--warn); border-radius:7px; padding:1px 6px; font-weight:700; font-size:13.5px; cursor:pointer; color:inherit; }
+  .cloze-slot:hover { border-color:var(--brand); }
+  .cloze-slot.focus { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .cloze-slot.right { background:var(--c13); border-color:var(--ok); color:var(--ink); cursor:default; }
+  .cloze-slot.wrongpick { background:var(--c4); border-color:var(--bad); color:var(--ink); cursor:default; }
+  /* R5 听力方案A：原生播放器 */
+  .listen-player { margin-top:10px; }
+  .listen-player video { width:100%; border-radius:10px; background:#000; }
+  .listen-strip { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center; }
+  .listen-strip button { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 10px; font-size:12.5px; cursor:pointer; color:inherit; }
+  .listen-strip button:hover { border-color:var(--brand); }
+  .listen-strip button.cur { border-color:var(--brand); background:var(--c2); font-weight:700; }
+  .lp-auto { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--sub); margin-left:4px; cursor:pointer; }
   mark.hl { background:var(--hl); border-radius:3px; padding:0 1px; cursor:pointer; }
   .hl-bar { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin:-4px 0 12px; font-size:12.5px; color:var(--sub); }
   .hl-bar button { background:none; border:none; color:var(--brand-ink); cursor:pointer; font-size:12.5px; padding:2px 8px; }
@@ -307,9 +324,11 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="core.js?v=5"></script>
+<script src="core.js?v=7"></script>
   <!-- 按需加载（架构级）：首屏只带元数据骨架（meta.js 440KB ≈ 全量的 1/20），做题/加练时动态加载对应卷（见 ensurePapers） -->
   <script src="bank/meta.js"></script>
+  <script src="hls.min.js"></script>
+  <script src="bank/listeningMeta.js"></script>
 <script>
 (function () {
   'use strict';
@@ -437,6 +456,7 @@
   var state = C.newState();
   var today = C.todayStr();
   var session = null;
+  var currentClozeQno = null; // R5-选词方案2：当前被点选的选词空格（词库点词填充目标）
   // P2-b：本次载入被 core 截断掉的高亮处数 { total, pids }；非持久化，只描述"这次载入发生了什么"
   var hlTruncated = { total: 0, pids: {} };
 
@@ -925,15 +945,15 @@
       if (run.type === 'listening') {
         var lu = listeningUrlFor(run.paper, BANKS);
         if (lu && !safeListeningUrl(lu)) lu = ''; // 双保险：写进 src/href 的串一律再确认一次白名单（N-SEC-1）
+        var srcPid = (run.paper.listeningUrl ? run.paper.id : run.paper.listeningSharedWith) || run.paper.id; // 共用卷取源卷 id，匹配烘焙数据
         html += '<div class="card"><div class="row"><b>🎧 听力音频</b>' +
-          (lu ? '<a href="' + esc(lu) + '" target="_blank" rel="noopener" class="muted" style="font-size:12px">新窗口打开 ↗</a>' : '') + '</div>' +
+          (lu ? '<a href="' + esc(lu) + '" target="_blank" rel="noopener" class="muted" style="font-size:12px">原站打开 ↗</a>' : '') + '</div>' +
           '<div class="muted" style="font-size:12px;margin-bottom:8px">本组 ' + run.qs.length + ' 题共用这一段录音（' + qnoRange(run.qs) + '）' + (run.paper.listeningSharedWith ? ' · 听力与 ' + esc(run.paper.listeningSharedWith) + ' 共用' : '') + '</div>' +
-          (lu ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" title="听力播放器"></iframe>' : '<div class="empty">本卷听力页暂不可用，请在浏览器搜索该卷听力音频</div>') +
+          listenPlayerBlock(srcPid, run.qs) +
           '</div>';
       } else if (run.type === 'cloze') {
         var cPid = run.paper.id + '#cloze#' + run.mk;
-        html += renderClozePassage(run.paper, run.qs, cPid) + hlBar(cPid);
-        html += '<div class="wordbank">' + (run.qs[0].options || []).map(function (w) { return '<span>' + esc(w) + '</span>'; }).join('') + '</div>';
+        html += renderClozeRun(run, cPid); // R5-选词方案2：整篇词库 + 段落内填空位，不再每空重复 15 词
       } else if (run.type === 'match') {
         var mPid = run.paper.id + '#match#' + run.mk;
         html += '<div class="passage" data-pid="' + esc(mPid) + '" style="max-height:none"><b>' + esc(run.paper.matchIntro || '') + '</b>\n\n' +
@@ -956,7 +976,44 @@
     body.innerHTML = html;
     restoreHl();
     attachHighlighter();
+    bindListenPlayer(body); // R5 听力方案A：绑定原生播放器（判分前后都可听音频）
     if (!s.submitted) {
+      // R5-选词方案2：词库点选填空交互
+      currentClozeQno = null;
+      Array.prototype.forEach.call(body.querySelectorAll('.wb-chip'), function (chip) {
+        chip.onclick = function () {
+          if (currentClozeQno == null) { toast('先点选段落里的一个空格'); return; }
+          var slot = body.querySelector('.cloze-slot[data-qno="' + currentClozeQno + '"]');
+          if (!slot) return;
+          var qid = slot.getAttribute('data-q');
+          var L = chip.getAttribute('data-w');
+          s.draft[qid] = L;
+          slot.setAttribute('data-picked', L);
+          slot.innerHTML = esc(chip.getAttribute('data-v'));
+          saveDraft();
+          updateClozeAnswered();
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll('.cloze-slot'), function (slot) {
+        slot.onclick = function () {
+          var qno = Number(slot.getAttribute('data-qno'));
+          var picked = slot.getAttribute('data-picked');
+          if (currentClozeQno === qno && picked) {
+            var qid = slot.getAttribute('data-q');
+            delete s.draft[qid];
+            slot.setAttribute('data-picked', '');
+            slot.innerHTML = '&nbsp;';
+            saveDraft();
+            updateClozeAnswered();
+            currentClozeQno = null;
+            slot.classList.remove('focus');
+            return;
+          }
+          currentClozeQno = qno;
+          Array.prototype.forEach.call(body.querySelectorAll('.cloze-slot'), function (x) { x.classList.remove('focus'); });
+          slot.classList.add('focus');
+        };
+      });
       Array.prototype.forEach.call(body.querySelectorAll('.opt'), function (b) {
         b.onclick = function () {
           var qid = b.getAttribute('data-q');
@@ -979,6 +1036,87 @@
       };
     }
   }
+  // ---------- R5 听力方案A：原生 hls.js 播放器 ----------
+  // 数据来自 app/bank/listeningMeta.js（烘焙 CET6_LISTEN_META[srcPaperId] = {src, pieces:[{label,start,end}]}）
+  function listenSrc(pid) { return ((window.CET6_LISTEN_META || {})[pid] || {}).src || ''; }
+  function listenPieces(pid) { return ((window.CET6_LISTEN_META || {})[pid] || {}).pieces || null; }
+  function listenQRange(label) {
+    var m = /(\d+)\s*[–-]\s*(\d+)/.exec(label || '');
+    return m ? [Number(m[1]), Number(m[2])] : null;
+  }
+  function listenPlayerBlock(pid, qs) {
+    var pieces = listenPieces(pid);
+    if (!pieces || !pieces.length) {
+      // 烘焙缺失 → 退回原站 iframe（仍走白名单）
+      var lu = listeningUrlFor(C.findPaper(BANKS, pid) || {}, BANKS);
+      if (lu && !safeListeningUrl(lu)) lu = '';
+      return lu
+        ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" title="听力播放器"></iframe>'
+        : '<div class="empty">本卷听力暂不可用，请在浏览器搜索该卷听力音频</div>';
+    }
+    var min = Math.min.apply(null, qs.map(function (q) { return q.qno; }));
+    var cur = 0;
+    for (var i = 0; i < pieces.length; i++) {
+      var r = listenQRange(pieces[i].label);
+      if (r && min >= r[0] && min <= r[1]) { cur = i; break; }
+    }
+    var strip = pieces.map(function (pc, i) {
+      var r = listenQRange(pc.label);
+      var txt = (i === cur ? '▶ 本篇 ' : '篇' + (i + 1) + ' ') + (r ? esc(r[0] + '-' + r[1]) : '');
+      return '<button type="button" class="lp-piece' + (i === cur ? ' cur' : '') + '" data-i="' + i + '" title="' + esc(pc.label) + '">' + txt + '</button>';
+    }).join('');
+    return '<div class="listen-player" data-pid="' + esc(pid) + '" data-cur="' + cur + '">' +
+      '<video controls playsinline webkit-playsinline preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>' +
+      '<div class="listen-strip">' + strip +
+      '<label class="lp-auto"><input type="checkbox" checked> 篇间连播</label></div>' +
+      '<div class="muted" style="font-size:11.5px;margin-top:6px">点「▶ 本篇」或任一篇播放；勾选连播时，本篇播完自动接续下一篇。</div></div>';
+  }
+  var _lpHls = null; // 全局复用单个 hls 实例（同一时间只播一路）
+  function bindListenPlayer(cont) {
+    Array.prototype.forEach.call(cont.querySelectorAll('.listen-player'), function (box) {
+      var pid = box.getAttribute('data-pid');
+      var src = listenSrc(pid), pieces = listenPieces(pid);
+      if (!src || !pieces || !pieces.length) return;
+      var video = box.querySelector('video');
+      var auto = box.querySelector('.lp-auto input');
+      var cur = Number(box.getAttribute('data-cur') || 0);
+      box._autoOn = !!auto;
+      if (auto) auto.onchange = function () { box._autoOn = auto.checked; };
+      function loadPiece(i) {
+        var pc = pieces[i];
+        if (window.Hls && window.Hls.isSupported()) {
+          if (!_lpHls) _lpHls = new window.Hls();
+          try { _lpHls.detachMedia && _lpHls.detachMedia(); } catch (e) {}
+          _lpHls.loadSource(src);
+          _lpHls.attachMedia(video);
+          _lpHls.off(window.Hls.Events.MANIFEST_PARSED);
+          _lpHls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+            try { video.currentTime = pc.start; video.play && video.play().catch(function () {}); } catch (e) {}
+          });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = src;
+          video.currentTime = pc.start;
+          video.play && video.play().catch(function () {});
+        } else {
+          toast('当前浏览器不支持 HLS 播放，请在「原站打开」收听');
+          return;
+        }
+        Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) { b.classList.remove('cur'); });
+        var btns = box.querySelectorAll('.lp-piece');
+        if (btns[i]) btns[i].classList.add('cur');
+        box.setAttribute('data-cur', String(i));
+        cur = i;
+      }
+      video.ontimeupdate = function () {
+        if (!box._autoOn) return;
+        var pc = pieces[cur];
+        if (pc && video.currentTime >= pc.end && cur < pieces.length - 1) loadPiece(cur + 1);
+      };
+      Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) {
+        b.onclick = function () { loadPiece(Number(b.getAttribute('data-i'))); };
+      });
+    });
+  }
   function optBtn(q, v, text) {
     var s = session;
     var pick = s.draft[q.id] || null;
@@ -993,17 +1131,14 @@
   }
   function renderOneQ(q, paper) {
     var html = '<div class="card"><b>' + (q.type === 'match' ? '' : 'Q' + esc(String(q.qno)) + '. ') + esc(q.stem) + '</b><span class="muted" style="display:block;margin-top:2px">真题 ' + esc(paper.id) + '</span>';
+    // R5-选词方案2：选词空格已并入段落填空位（renderClozeRun），此处直接返回
+    if (q.type === 'cloze') return '';
     if (q.type === 'match') {
       html += '<div class="muted" style="margin:6px 0 10px">这条信息出现在哪个段落？</div>';
       var letters = (paper.matchParagraphs || []).map(function (p) { return p.label; });
       html += '<div style="display:flex;flex-wrap:wrap;gap:8px">' + letters.map(function (L) {
         return optBtn(q, L, esc(L) + ' 段');
       }).join('') + '</div>';
-    } else if (q.type === 'cloze') {
-      html += '<div class="muted" style="margin:6px 0 10px">第 ' + esc(String(q.qno)) + ' 空应填哪个词？</div>';
-      html += (q.options || []).map(function (o, i) {
-        return optBtn(q, String.fromCharCode(65 + i), esc(o));
-      }).join('');
     } else {
       html += '<div style="margin-top:10px">' + (q.options || []).map(function (o, i) {
         return optBtn(q, String.fromCharCode(65 + i), esc(o));
@@ -1048,15 +1183,55 @@
     renderGroup();
     window.scrollTo(0, 0);
   }
-  function renderClozePassage(paper, qs, pid) {
+  // R5-选词方案2：整篇词库点选填空。
+  // 词库 = 15 个可点词块（带字母 A-O），空格 = 段落内的可点填空位。
+  // 点填空位选中（focus）→ 点词块填入（draft[qid]=字母）；再点已填空位可清除。
+  // 已判分后：填空位显示所选词并标 right/wrongpick，词库禁用。
+  function clozeBank(run) {
+    return (run.qs[0] && run.qs[0].options) || [];
+  }
+  function clozeWordAt(bank, letter) {
+    if (letter == null || letter === '') return '';
+    var i = String(letter).charCodeAt(0) - 65;
+    return bank[i] || '';
+  }
+  function renderClozeRun(run, pid) {
+    var paper = run.paper, s = session;
+    var bank = clozeBank(run);
+    var wb = '<div class="wordbank" id="clozeBank">' + bank.map(function (w, i) {
+      var L = String.fromCharCode(65 + i);
+      var dis = s.submitted ? ' disabled' : '';
+      return '<button type="button" class="wb-chip" data-w="' + L + '" data-v="' + esc(w) + '"' + dis + '>' + esc(L) + ') ' + esc(w) + '</button>';
+    }).join('') + '</div>';
     var txt = paper.clozePassage || '';
-    var qnos = qs.map(function (q) { return q.qno; });
-    var html = '<div class="passage" data-pid="' + esc(pid) + '" style="max-height:none;overflow:visible">' + esc(txt);
-    html = html.replace(/\b(2[6-9]|3[0-5])\b/g, function (m) {
-      if (qnos.indexOf(Number(m)) < 0) return m;
-      return '<span class="blank-mark">' + m + '</span>';
+    var html = wb + '<div class="passage" data-pid="' + esc(pid) + '" style="max-height:none;overflow:visible">' + esc(txt);
+    html = html.replace(/__(2[6-9]|3[0-5])__/g, function (m, num) {
+      var qno = Number(num);
+      var q = null;
+      for (var k = 0; k < run.qs.length; k++) if (run.qs[k].qno === qno) { q = run.qs[k]; break; }
+      if (!q) return m;
+      var picked = s.draft[q.id] || null;
+      var word = clozeWordAt(bank, picked);
+      var cls = 'cloze-slot';
+      if (s.submitted) {
+        cls += (picked === q.answer) ? ' right' : (picked ? ' wrongpick' : '');
+        return '<button type="button" class="' + cls + '" data-q="' + esc(q.id) + '" data-qno="' + qno + '" data-picked="' + (picked || '') + '" disabled title="正确词：' + esc(clozeWordAt(bank, q.answer)) + '">' + (word ? esc(word) : '&nbsp;') + '</button>';
+      }
+      return '<button type="button" class="' + cls + '" data-q="' + esc(q.id) + '" data-qno="' + qno + '" data-picked="' + (picked || '') + '">' + (word ? esc(word) : '&nbsp;') + '</button>';
     });
-    return html + '</div>';
+    return html + '</div>' + hlBar(pid);
+  }
+  function updateClozeAnswered() {
+    var s = session;
+    if (!s) return;
+    var ans = 0; s.qids.forEach(function (id) { if (s.draft[id]) ans++; });
+    $('quizProg').textContent = grpTagFor(s) + '本组 ' + s.qids.length + ' 题 · 已答 ' + ans;
+    var sb = $('groupSubmit');
+    if (sb) { sb.disabled = false; sb.textContent = '提交本组（' + ans + '/' + s.qids.length + '）'; }
+  }
+  function grpTagFor(s) {
+    var grpPaper = (s.item.qids && s.item.qids.length) ? C.findPaper(BANKS, s.item.qids[0]) : null;
+    return grpPaper ? grpPaper.id + ' · ' : (s.item.paperId ? s.item.paperId + ' · ' : '');
   }
 
   // ---------- P4 阅读划词高亮：选中文字 → 点「高亮」标黄；点已高亮词取消；随做题组持久化到 state.hl ----------
