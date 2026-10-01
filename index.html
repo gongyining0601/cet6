@@ -535,6 +535,8 @@ if (location.protocol === 'https:') {
   // ---------- 工具 ----------
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  // 去除题库选项自带的字母前缀（如 "A) Lack of money." → "Lack of money."），防止与前端自动添加的 A/B/C/D 重复
+  function stripOptionPrefix(s) { return String(s).replace(/^[A-Z]\)\s*/, ''); }
   function toast(msg) { var t = $('toast'); t.textContent = msg; t.className = 'toast show'; setTimeout(function () { t.className = 'toast'; }, 1800); }
   // M-5：存储写满（QuotaExceededError）时不能只在 toast 里飘一下就被后面的成功提示盖掉，
   // 改成"首次失败提示 + 常驻横幅"，并且把成败返回给调用方，让完成提示说实话。
@@ -1197,7 +1199,8 @@ if (location.protocol === 'https:') {
       }).join('') + '</div>';
     } else {
       html += '<div style="margin-top:10px">' + (q.options || []).map(function (o, i) {
-        return optBtn(q, String.fromCharCode(65 + i), esc(o));
+        // 题库选项自带 "A) " 前缀：剥离后只显示纯文本，字母只用于 data-v/交互
+        return optBtn(q, String.fromCharCode(65 + i), esc(stripOptionPrefix(o)));
       }).join('') + '</div>';
     }
     if (session.submitted) {
@@ -1249,7 +1252,7 @@ if (location.protocol === 'https:') {
   function clozeWordAt(bank, letter) {
     if (letter == null || letter === '') return '';
     var i = String(letter).charCodeAt(0) - 65;
-    return bank[i] || '';
+    return stripOptionPrefix(bank[i] || ''); // 题库词块自带 "A) " 前缀，显示时剥离
   }
   function renderClozeRun(run, pid) {
     var paper = run.paper, s = session;
@@ -1257,7 +1260,7 @@ if (location.protocol === 'https:') {
     var wb = '<div class="wordbank" id="clozeBank">' + bank.map(function (w, i) {
       var L = String.fromCharCode(65 + i);
       var dis = s.submitted ? ' disabled' : '';
-      return '<button type="button" class="wb-chip" data-w="' + L + '" data-v="' + esc(w) + '"' + dis + '>' + esc(L) + ') ' + esc(w) + '</button>';
+      return '<button type="button" class="wb-chip" data-w="' + L + '" data-v="' + esc(w) + '"' + dis + '>' + esc(L) + ') ' + esc(stripOptionPrefix(w)) + '</button>';
     }).join('') + '</div>';
     var txt = paper.clozePassage || '';
     var html = wb + '<div class="passage" data-pid="' + esc(pid) + '" style="max-height:none;overflow:visible">' + esc(txt);
