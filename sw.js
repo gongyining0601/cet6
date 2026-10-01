@@ -9,7 +9,7 @@
  */
 try { importScripts('./version.js'); } catch (e) { }
 var VERSION = self.CET6_VERSION || 'cet6-v21';
-var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './hls.min.js', './bank/listeningMeta.js',
+var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js',
   './bank/img/2015-12-1.jpg', './bank/img/2015-12-2.jpg', './bank/img/2015-12-3.jpg',
   './bank/img/2021-06-1.jpg', './bank/img/2021-06-2.jpg', './bank/img/2021-06-3.jpg'];
 /* 卷清单来自 meta.js（顶层 IIFE 挂到 self.CET6_META）：activate 后分批后台预热。
