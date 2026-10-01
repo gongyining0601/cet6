@@ -1103,25 +1103,39 @@ if (location.protocol === 'https:') {
       var txt = (i === cur ? '▶ 本篇 ' : '篇' + (i + 1) + ' ') + (r ? esc(r[0] + '-' + r[1]) : '');
       return '<button type="button" class="lp-piece' + (i === cur ? ' cur' : '') + '" data-i="' + i + '" title="' + esc(pc.label) + '">' + txt + '</button>';
     }).join('');
+    var fbLu = listeningUrlFor(C.findPaper(BANKS, pid) || {}, BANKS);
+    if (fbLu && !safeListeningUrl(fbLu)) fbLu = '';
+    var fbLink = fbLu ? '<a href="' + esc(fbLu) + '" target="_blank" rel="noopener" style="font-weight:700">打开懒笔记原站收听 ↗</a>' : '';
     return '<div class="listen-player" data-pid="' + esc(pid) + '" data-cur="' + cur + '">' +
       '<video controls playsinline webkit-playsinline preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>' +
       '<div class="listen-strip">' + strip +
       '<label class="lp-auto"><input type="checkbox" checked> 篇间连播</label></div>' +
+      '<div class="lp-fallback" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12.5px">🎧 本浏览器无法直接播放该音频（音频站跨域限制），请 ' + fbLink + ' ，听完返回作答。</div>' +
       '<div class="muted" style="font-size:11.5px;margin-top:6px">点「▶ 本篇」或任一篇播放；勾选连播时，本篇播完自动接续下一篇。</div></div>';
   }
   var _lpHls = null; // 全局复用单个 hls 实例（同一时间只播一路）
-  function getHls() { // 带致命错误恢复的 hls 单例：网络错重试、媒体错恢复、其他给兜底提示
+  var _lpActive = null; // 当前正在用 hls 的播放器上下文（供致命错误时降级）
+  function getHls() { // 带致命错误恢复的 hls 单例：网络错重试，4秒内再败/其他致命错→降级原生HLS
     if (_lpHls || !window.Hls) return _lpHls;
     _lpHls = new window.Hls();
+    var netFirstAt = 0;
     _lpHls.on(window.Hls.Events.ERROR, function (evt, data) {
       if (!data || !data.fatal) return;
       if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-        toast('听力音频网络异常，正在重试…');
-        try { _lpHls.startLoad(); } catch (e) { }
+        // 音频CDN的CORS只放行懒笔记自家域：本站走hls.js(fetch/XHR)在Chrome/Edge会被拦，
+        // 表现为快速连续网络致命错。首次重试一次（兼容真·弱网抖动），4秒内再败即降级原生HLS。
+        var now = Date.now();
+        if (netFirstAt && now - netFirstAt < 4000) {
+          if (_lpActive && _lpActive.nativeFallback) _lpActive.nativeFallback();
+        } else {
+          netFirstAt = now;
+          toast('听力音频网络异常，正在重试…');
+          try { _lpHls.startLoad(); } catch (e) { }
+        }
       } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
         try { _lpHls.recoverMediaError(); } catch (e) { }
       } else {
-        toast('听力播放失败，可点「原站打开」收听');
+        if (_lpActive && _lpActive.nativeFallback) _lpActive.nativeFallback();
       }
     });
     return _lpHls;
@@ -1133,17 +1147,40 @@ if (location.protocol === 'https:') {
       if (!src || !pieces || !pieces.length) return;
       var video = box.querySelector('video');
       var auto = box.querySelector('.lp-auto input');
+      var fallback = box.querySelector('.lp-fallback');
       var cur = Number(box.getAttribute('data-cur') || 0);
       box._autoOn = !!auto;
       if (auto) auto.onchange = function () { box._autoOn = auto.checked; };
+      // 原生HLS直连：<video src=m3u8> 走媒体元素加载，不受CORS限制（Chrome/Edge142+、iOS、Android Chrome均原生支持）
+      function nativePlay(pc) {
+        box._native = true;
+        if (fallback) fallback.style.display = 'none';
+        if (_lpHls) { try { _lpHls.stopLoad && _lpHls.stopLoad(); _lpHls.detachMedia && _lpHls.detachMedia(); } catch (e) {} }
+        video.onloadedmetadata = function () { try { video.currentTime = pc.start; } catch (e) {} video.play && video.play().catch(function () {}); };
+        video.src = src;
+        if (video.readyState >= 1) { try { video.currentTime = pc.start; } catch (e) {} video.play && video.play().catch(function () {}); }
+      }
       video.onerror = function () {
         if (!video.currentSrc && !video.src) return; // 尚未加载任何源时的空触发不打扰
-        toast('音频加载失败，可点右上角「原站打开」收听');
+        if (box._native && fallback) {
+          fallback.style.display = ''; // 原生也失败（如桌面Firefox）：常驻原站入口
+        } else {
+          toast('音频加载失败，可点「原站打开」收听');
+        }
       };
+      function markCur(i) {
+        Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) { b.classList.remove('cur'); });
+        var btns = box.querySelectorAll('.lp-piece');
+        if (btns[i]) btns[i].classList.add('cur');
+        box.setAttribute('data-cur', String(i));
+        cur = i;
+      }
       function loadPiece(i) {
         var pc = pieces[i];
+        if (box._native) { nativePlay(pc); markCur(i); return; }
         if (window.Hls && window.Hls.isSupported()) {
           var hls = getHls();
+          _lpActive = { box: box, nativeFallback: function () { nativePlay(pc); } };
           try { hls.detachMedia && hls.detachMedia(); } catch (e) {}
           hls.loadSource(src);
           hls.attachMedia(video);
@@ -1152,18 +1189,12 @@ if (location.protocol === 'https:') {
             try { video.currentTime = pc.start; video.play && video.play().catch(function () {}); } catch (e) {}
           });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = src;
-          video.currentTime = pc.start;
-          video.play && video.play().catch(function () {});
+          nativePlay(pc);
         } else {
-          toast('当前浏览器不支持 HLS 播放，请在「原站打开」收听');
+          if (fallback) fallback.style.display = '';
           return;
         }
-        Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) { b.classList.remove('cur'); });
-        var btns = box.querySelectorAll('.lp-piece');
-        if (btns[i]) btns[i].classList.add('cur');
-        box.setAttribute('data-cur', String(i));
-        cur = i;
+        markCur(i);
       }
       video.ontimeupdate = function () {
         if (!box._autoOn) return;
