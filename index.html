@@ -1123,7 +1123,14 @@ if (location.protocol === 'https:') {
       if (!data || !data.fatal) return;
       if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
         // 音频CDN的CORS只放行懒笔记自家域：本站走hls.js(fetch/XHR)在Chrome/Edge会被拦，
-        // 表现为快速连续网络致命错。首次重试一次（兼容真·弱网抖动），4秒内再败即降级原生HLS。
+        // 表现为 manifest 拉取直接失败（hls内部退避重试不会快速产生第二次致命错）。
+        // manifestLoadError/Timeout 即跨域或不可达的强信号 → 立即降级原生HLS；
+        // 仅分片(fragment)网络错才按弱网重试。
+        var det = String(data && data.details || '');
+        if (/^manifestLoad/i.test(det)) {
+          if (_lpActive && _lpActive.nativeFallback) _lpActive.nativeFallback();
+          return;
+        }
         var now = Date.now();
         if (netFirstAt && now - netFirstAt < 4000) {
           if (_lpActive && _lpActive.nativeFallback) _lpActive.nativeFallback();
@@ -1157,6 +1164,7 @@ if (location.protocol === 'https:') {
         if (fallback) fallback.style.display = 'none';
         if (_lpHls) { try { _lpHls.stopLoad && _lpHls.stopLoad(); _lpHls.detachMedia && _lpHls.detachMedia(); } catch (e) {} }
         video.onloadedmetadata = function () { try { video.currentTime = pc.start; } catch (e) {} video.play && video.play().catch(function () {}); };
+        try { video.removeAttribute('src'); video.load(); } catch (e) {} // 清掉 hls.js 挂的 blob，再交给原生
         video.src = src;
         if (video.readyState >= 1) { try { video.currentTime = pc.start; } catch (e) {} video.play && video.play().catch(function () {}); }
       }
