@@ -44,7 +44,7 @@
   CORE.PLAN_TARGET = 25;
   CORE.PLAN_CAP = 40;
   CORE.REVIEW_CAP = 10;
-  CORE.PLAN_VERSION = 7; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v7=主题型日+听力每天保底+听力组按篇对齐；v6=两流配速协同+同日卷号稳定排序）
+  CORE.PLAN_VERSION = 8; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v8=听力篇边界改读 listeningMeta 实测分片；v7=主题型日+听力每天保底+听力组按篇对齐）
 
   // ---------- 题库索引 ----------
   CORE.allQuestions = function (banks) {
@@ -179,14 +179,37 @@
   CORE.paperOrder = function (banks) { // 最近考期优先
     return banks.slice().sort(function (a, b) { return a.id < b.id ? 1 : (a.id > b.id ? -1 : 0); });
   };
-  // v7（R5）：听力"篇对齐"——每卷听力按真实音频"篇"切组（Section A 2 篇、B 2 篇、C 3 篇），
-  // 使"一天排的听力组 = 要播的音频篇"，与原生播放器的「播放本篇」1:1 对应。
-  // 篇边界与实测听力页 ListeningAudioBar 的 pieces 完全一致：1-4 / 5-8 / 9-11 / 12-15 / 16-18 / 19-21 / 22-25。
+  // v8：听力"篇对齐"——每卷听力按真实音频"篇"切组，使"一天排的听力组 = 要播的音频篇"，
+  // 与原生播放器的「播放本篇」1:1 对应。篇边界优先取 listeningMeta.js 的实测烘焙分片
+  // （各卷真实切分并不一致，如 2015/2017 部分卷是 6 篇且末篇止于 20-22 题）；
+  // 该卷无烘焙数据时回退到下面的通用 7 篇边界。
   var LISTEN_PIECES = [
     [1, 4, 'Section A·第1篇'], [5, 8, 'Section A·第2篇'],
     [9, 11, 'Section B·第1篇'], [12, 15, 'Section B·第2篇'],
     [16, 18, 'Section C·第1篇'], [19, 21, 'Section C·第2篇'], [22, 25, 'Section C·第3篇']
   ];
+  function listenMetaRoot() {
+    if (typeof window !== 'undefined' && window.CET6_LISTEN_META) return window.CET6_LISTEN_META;
+    if (typeof self !== 'undefined' && self.CET6_LISTEN_META) return self.CET6_LISTEN_META;
+    if (typeof globalThis !== 'undefined' && globalThis.CET6_LISTEN_META) return globalThis.CET6_LISTEN_META;
+    return null;
+  }
+  // 返回 [[startQno, endQno, 篇名], ...]；共用卷取源卷的分片（与 index.html 播放器同一口径）
+  CORE.listenPiecesFor = function (paper) {
+    var LM = paper ? listenMetaRoot() : null;
+    var meta = LM && (LM[paper.id] || (paper.listeningSharedWith && LM[paper.listeningSharedWith]));
+    if (meta && Array.isArray(meta.pieces) && meta.pieces.length) {
+      var out = [];
+      meta.pieces.forEach(function (pc) {
+        var m = /(\d+)\s*[–-]\s*(\d+)/.exec((pc && pc.label) || '');
+        if (!m) return;
+        var name = String(pc.label).replace(/\s*[·\-–—]?\s*\d+\s*[–-]\s*\d+\s*题?\s*$/, '');
+        out.push([Number(m[1]), Number(m[2]), name || ('第' + (out.length + 1) + '篇')]);
+      });
+      if (out.length) return out;
+    }
+    return LISTEN_PIECES;
+  };
   function mkUnit(paper, type, qs, label) {
     return {
       paperId: paper.id, type: type, label: label,
@@ -200,10 +223,20 @@
     var units = [];
     CORE.paperOrder(banks).forEach(function (p) {
       var qs = (p.questions || []).slice().sort(function (a, b) { return a.qno - b.qno; });
-      LISTEN_PIECES.forEach(function (pc) {
+      var lps = CORE.listenPiecesFor(p);
+      var coveredQno = {};
+      var lUnits = [];
+      lps.forEach(function (pc) {
         var lst = qs.filter(function (q) { return q.type === 'listening' && q.qno >= pc[0] && q.qno <= pc[1]; });
-        if (lst.length) units.push(mkUnit(p, 'listening', lst, '听力·' + pc[2] + ' ' + lst[0].qno + '-' + lst[lst.length - 1].qno));
+        lst.forEach(function (q) { coveredQno[q.qno] = 1; });
+        if (lst.length) lUnits.push(mkUnit(p, 'listening', lst, '听力·' + pc[2] + ' ' + lst[0].qno + '-' + lst[lst.length - 1].qno));
       });
+      // 烘焙分片未覆盖到的听力题（如 2015 各卷末篇止于 22 题、剩余 23-25）补成独立单元，保证全题可排
+      var lrest = qs.filter(function (q) { return q.type === 'listening' && !coveredQno[q.qno]; });
+      if (lrest.length) lUnits.push(mkUnit(p, 'listening', lrest, '听力·补充篇 ' + lrest[0].qno + '-' + lrest[lrest.length - 1].qno));
+      // 个别卷烘焙分片自身乱序（2017-12-1 第 6 片是 23-25、19-22 无片），按首题号升序归位
+      lUnits.sort(function (a, b) { return a.qnos[0] - b.qnos[0]; });
+      lUnits.forEach(function (u) { units.push(u); });
       var cl = qs.filter(function (q) { return q.type === 'cloze'; });
       if (cl.length) units.push(mkUnit(p, 'cloze', cl, '选词填空·整篇 26-35'));
       var mt = qs.filter(function (q) { return q.type === 'match'; });
@@ -430,7 +463,6 @@
     Object.keys(state.papers).forEach(function (qid) {
       var st = state.papers[qid];
       if (!st) return; // 脏存档兜底：papers 里值为空则不计入
-      var type = qid.split('-')[1] === 'l' ? 'listening' : (qid.split('-')[1] === 'c' ? 'cloze' : (qid.split('-')[1] === 'm' ? 'match' : 'reading'));
       // id 形如 2026-06-1-l-3
       var parts = qid.split('-');
       var t = parts[3] === 'l' ? 'listening' : (parts[3] === 'c' ? 'cloze' : (parts[3] === 'm' ? 'match' : 'reading'));
@@ -446,24 +478,39 @@
   CORE.hlTruncatedOnLoad = { total: 0, pids: {} };
   // 多账号：每个手机号一个独立存档，数据保存在各自设备本地
   CORE.stateKey = function (phone) { return CORE.STORAGE_KEY + '_' + phone; };
+  // 坏档隔离：最近一次 loadState 遇到无法解析/结构非法的存档时，原始串备份到的键名（无则为 null）。
+  // 调用方可据此提示用户"旧记录没丢，被隔离了"。
+  CORE.lastCorruptBackup = null;
   CORE.loadState = function (storage, key, banks) {
+    CORE.lastCorruptBackup = null;
+    var k = key || CORE.STORAGE_KEY;
+    var raw;
+    try { raw = storage.getItem(k); } catch (e) { return CORE.newState(); }
+    if (!raw) return CORE.newState();
     try {
-      var raw = storage.getItem(key || CORE.STORAGE_KEY);
-      if (!raw) return CORE.newState();
       var s = JSON.parse(raw);
-      if (!s.version) return CORE.newState();
+      if (!s || !s.version) throw new Error('bad-state');
       // 迁移：旧版错题条目补自适应字段（按原 box 阶梯推算 iv）
       if (s.wrongbook && typeof s.wrongbook === 'object' && !Array.isArray(s.wrongbook)) {
         Object.keys(s.wrongbook).forEach(function (qid) {
           var wb = s.wrongbook[qid];
-          if (!wb || typeof wb !== 'object') return; // 脏存档：值为 null / 标量时跳过，不再抛错后整份状态被静默重置
+          if (!wb || typeof wb !== 'object') return; // 脏存档：值为 null / 标量时跳过
           if (wb.ease === undefined) wb.ease = 2.5;
           if (wb.streak === undefined) wb.streak = 0;
           if (wb.iv === undefined) wb.iv = CORE.INTERVALS[Math.min(wb.box || 0, CORE.INTERVALS.length - 1)];
         });
       }
       return CORE.normalizeState(s, banks);
-    } catch (e) { return CORE.newState(); }
+    } catch (e) {
+      // 坏档隔离（不再静默重置）：先把原始串原样备份到 <key>_corrupted_<日期>，
+      // 之后调用方 save() 覆盖原 key 也不丢旧记录——可人工从备份键恢复。
+      try {
+        var bk = k + '_corrupted_' + CORE.todayStr();
+        if (!storage.getItem(bk)) storage.setItem(bk, raw);
+        CORE.lastCorruptBackup = bk;
+      } catch (e2) { }
+      return CORE.newState();
+    }
   };
   CORE.newState = function () {
     return { version: 1, history: {}, papers: {}, wrongbook: {}, plan: null, essays: {} };

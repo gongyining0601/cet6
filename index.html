@@ -7,6 +7,17 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="六级打卡">
+<script>
+// CSP（安全加固）：只在 https 线上环境注入；本地 file:// 双击打开不注入，避免浏览器对 file 源误拦。
+// script/style 保留 'unsafe-inline'（本页脚本来就内联），CSP 的价值在于禁 object/基座注入、
+// 限制 iframe 只能嵌白名单听力站、媒体/连接只走 https。
+if (location.protocol === 'https:') {
+  var _csp = document.createElement('meta');
+  _csp.httpEquiv = 'Content-Security-Policy';
+  _csp.content = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https: blob:; connect-src 'self' https:; frame-src https://*.lazynote.cn https://lazynote.cn; worker-src 'self' blob:; object-src 'none'; base-uri 'none'";
+  document.head.appendChild(_csp);
+}
+</script>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -324,7 +335,8 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="core.js?v=7"></script>
+<script src="version.js"></script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || '0') + '"><\/script>');</script>
   <!-- 按需加载（架构级）：首屏只带元数据骨架（meta.js 440KB ≈ 全量的 1/20），做题/加练时动态加载对应卷（见 ensurePapers） -->
   <script src="bank/meta.js"></script>
   <script src="hls.min.js"></script>
@@ -429,6 +441,13 @@
     // state 一律经 normalizeState 清洗（H-1）+ 幽灵 qid 清理（M-3/ N-SEC-3）：
     // 传入题库让 core 同时清掉 plan.items[].qids 里的幽灵题号（与 pruneGhosts 同口径）
     state = pruneGhosts(C.loadState(store, STATE_KEY, null)); // 幽灵清理统一由 pruneGhosts（meta 版）承担
+    // 坏档隔离提示：存档损坏已被 core 备份到隔离键、并从空状态重新开始——旧记录没丢，可人工恢复
+    if (C.lastCorruptBackup) {
+      var _bk = C.lastCorruptBackup;
+      setTimeout(function () {
+        alert('检测到本机存档损坏（可能是浏览器数据异常）。\n旧记录已自动隔离备份（内部键名 ' + _bk + '），没有丢失；现已从空记录重新开始。\n如需找回旧记录，请勿清理浏览器数据，并联系维护者从隔离备份恢复。');
+      }, 300);
+    }
     // P2-b（第三轮）：加载路径（core.normalizeState）会把单段超过 50 处的高亮静默截断——
     // 交互路径 saveHl 有 toast，恢复路径以前没有。这里把 core 记下的截断量接过来提示。
     hlTruncated = (C.hlTruncatedOnLoad && C.hlTruncatedOnLoad.total) ? C.hlTruncatedOnLoad : { total: 0, pids: {} };
@@ -515,7 +534,7 @@
 
   // ---------- 工具 ----------
   function $(id) { return document.getElementById(id); }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function toast(msg) { var t = $('toast'); t.textContent = msg; t.className = 'toast show'; setTimeout(function () { t.className = 'toast'; }, 1800); }
   // M-5：存储写满（QuotaExceededError）时不能只在 toast 里飘一下就被后面的成功提示盖掉，
   // 改成"首次失败提示 + 常驻横幅"，并且把成败返回给调用方，让完成提示说实话。
@@ -842,6 +861,11 @@
     $('quiz').classList.remove('show');
     bgInert(false); // P1-b：先撤掉背景 inert，再重渲染并把焦点还回去
     session = null;
+    // 会话期间另一标签页写过存档：以存储里的最新状态为准重新载入（本次会话的草稿/计时已在上一步落盘）
+    if (pendingResync) {
+      pendingResync = false;
+      try { state = pruneGhosts(C.loadState(store, STATE_KEY, null)); } catch (e) { }
+    }
     renderToday(); renderWrong(); renderStat();
     quizRestoreFocus(); // P1-b：焦点还给触发元素；它已被重画掉时退回当前页第一个可点元素
   }
@@ -1030,8 +1054,18 @@
       $('groupSubmit').onclick = submitGroup;
     } else {
       $('groupDone').onclick = function () {
-        if (it.isWrong) { toast('本轮错题重练完成'); quizExit(); }
-        else if (it.isPoint) { toast('薄弱考点专项练完成，考点正确率已更新'); quizExit(); }
+        if (it.isWrong || it.isPoint) {
+          // 错题重练/专项练也按题型标准时长计入今日分钟（此前只计清单组，复习时间全丢）
+          var mins = 0;
+          (it.qids || []).forEach(function (id) {
+            var q = C.findQ(BANKS, id);
+            mins += (q && C.TYPE_META[q.type] ? C.TYPE_META[q.type].minPerQ : 1);
+          });
+          mins = Math.round(mins * 10) / 10;
+          if (mins > 0) addMinutes(mins);
+          toast(it.isWrong ? '本轮错题重练完成（+' + mins + ' 分钟）' : '薄弱考点专项练完成，考点正确率已更新（+' + mins + ' 分钟）');
+          quizExit();
+        }
         else { this.disabled = true; finishItem(it); quizExit(); } // N-UI-2：点完立刻置灰，堵住连点
       };
     }
@@ -1050,8 +1084,10 @@
       // 烘焙缺失 → 退回原站 iframe（仍走白名单）
       var lu = listeningUrlFor(C.findPaper(BANKS, pid) || {}, BANKS);
       if (lu && !safeListeningUrl(lu)) lu = '';
+      // sandbox 只放 allow-scripts + allow-same-origin（跨域播放器需要自身源跑脚本/拉流，且域名已过白名单）；
+      // referrerpolicy=no-referrer 避免把本页地址泄给第三方
       return lu
-        ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" title="听力播放器"></iframe>'
+        ? '<iframe src="' + esc(lu) + '" style="width:100%;height:250px;border:1px solid var(--line);border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" loading="lazy" title="听力播放器"></iframe>'
         : '<div class="empty">本卷听力暂不可用，请在浏览器搜索该卷听力音频</div>';
     }
     var min = Math.min.apply(null, qs.map(function (q) { return q.qno; }));
@@ -1072,6 +1108,22 @@
       '<div class="muted" style="font-size:11.5px;margin-top:6px">点「▶ 本篇」或任一篇播放；勾选连播时，本篇播完自动接续下一篇。</div></div>';
   }
   var _lpHls = null; // 全局复用单个 hls 实例（同一时间只播一路）
+  function getHls() { // 带致命错误恢复的 hls 单例：网络错重试、媒体错恢复、其他给兜底提示
+    if (_lpHls || !window.Hls) return _lpHls;
+    _lpHls = new window.Hls();
+    _lpHls.on(window.Hls.Events.ERROR, function (evt, data) {
+      if (!data || !data.fatal) return;
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        toast('听力音频网络异常，正在重试…');
+        try { _lpHls.startLoad(); } catch (e) { }
+      } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+        try { _lpHls.recoverMediaError(); } catch (e) { }
+      } else {
+        toast('听力播放失败，可点「原站打开」收听');
+      }
+    });
+    return _lpHls;
+  }
   function bindListenPlayer(cont) {
     Array.prototype.forEach.call(cont.querySelectorAll('.listen-player'), function (box) {
       var pid = box.getAttribute('data-pid');
@@ -1082,15 +1134,19 @@
       var cur = Number(box.getAttribute('data-cur') || 0);
       box._autoOn = !!auto;
       if (auto) auto.onchange = function () { box._autoOn = auto.checked; };
+      video.onerror = function () {
+        if (!video.currentSrc && !video.src) return; // 尚未加载任何源时的空触发不打扰
+        toast('音频加载失败，可点右上角「原站打开」收听');
+      };
       function loadPiece(i) {
         var pc = pieces[i];
         if (window.Hls && window.Hls.isSupported()) {
-          if (!_lpHls) _lpHls = new window.Hls();
-          try { _lpHls.detachMedia && _lpHls.detachMedia(); } catch (e) {}
-          _lpHls.loadSource(src);
-          _lpHls.attachMedia(video);
-          _lpHls.off(window.Hls.Events.MANIFEST_PARSED);
-          _lpHls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+          var hls = getHls();
+          try { hls.detachMedia && hls.detachMedia(); } catch (e) {}
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          hls.off(window.Hls.Events.MANIFEST_PARSED);
+          hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
             try { video.currentTime = pc.start; video.play && video.play().catch(function () {}); } catch (e) {}
           });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -1360,7 +1416,7 @@
     if (h.floor || h.done) { toast('今天已记录过打卡'); return; }
     var m = prompt('今天再忙，也别让英语断档——记几分钟？（1 分钟也算数，坚持最可贵）：', '10');
     if (m === null) return;
-    var min = Math.max(1, parseInt(m, 10) || 10);
+    var min = Math.max(1, Math.min(600, parseInt(m, 10) || 10)); // 上限 600 分钟：防误输/脏值扭曲统计
     h.floor = true; h.minutes += min;
     var saved = save();
     toast(saved ? '忙日打卡 ' + min + ' 分钟，坚持住了！明天继续加油 💪'
@@ -1700,8 +1756,8 @@
         if (!ns.history || typeof ns.history !== 'object' || !ns.papers || typeof ns.papers !== 'object') throw new Error('bad');
         state = pruneGhosts(ns);
         renderAll(); // 渲染也可能因脏数据抛错，放在替换之后的 try 里，坏了就回滚
-        save();
-        toast('导入成功，打卡记录已恢复');
+        var saved = save();
+        toast(saved ? '导入成功，打卡记录已恢复' : '⚠️ 导入内容已在页面生效，但写入本机存储失败（空间已满/被拦截），请立即点「导出备份」留底');
       } catch (e) {
         state = oldState;
         try { renderAll(); } catch (e2) { } // 回到导入前的画面
@@ -1731,11 +1787,30 @@
 
   // ---------- 按需加载（架构级）：meta 骨架常驻；卷正文按需动态加载 ----------
   var loadedPapers = {};
+  var paperInflight = {}; // pid -> 等待回调队列：同一卷并发请求只发一次（去重）
+  var PAPER_LOAD_TIMEOUT = 15000; // 15s 超时：弱网下不再无限挂起"正在加载题库卷…"
   function loadPaperScript(pid, cb, onErr) {
+    if (loadedPapers[pid]) { cb && cb(); return; }
+    if (paperInflight[pid]) { paperInflight[pid].push({ cb: cb, onErr: onErr }); return; }
+    paperInflight[pid] = [{ cb: cb, onErr: onErr }];
+    var done = false;
+    function settle(ok) {
+      if (done) return; done = true;
+      var q = paperInflight[pid]; delete paperInflight[pid];
+      (q || []).forEach(function (w) { if (ok) { w.cb && w.cb(); } else { w.onErr && w.onErr(pid); } });
+    }
     var s = document.createElement('script');
     s.src = 'bank/cet6-' + pid + '.js';
-    s.onload = function () { loadedPapers[pid] = 1; cb && cb(); };
-    s.onerror = function () { onErr && onErr(pid); };
+    var timer = setTimeout(function () {
+      settle(false);
+      try { if (s.parentNode) s.parentNode.removeChild(s); } catch (e) { }
+    }, PAPER_LOAD_TIMEOUT);
+    s.onload = function () {
+      clearTimeout(timer);
+      loadedPapers[pid] = 1; // 即使超时后才到，也标记已注入，防止重复 append 同卷脚本
+      settle(true);
+    };
+    s.onerror = function () { clearTimeout(timer); settle(false); };
     document.head.appendChild(s);
   }
   function papersOfQids(qids) {
@@ -1785,6 +1860,31 @@
   function renderAll() {
     renderToday(); renderWrong(); renderStat();
   }
+
+  // ---------- 多标签页协调 + 跨午夜轮转 ----------
+  var pendingResync = false; // 做题会话中收到的外部写入先挂着，退出会话时再同步
+  // 另一标签页写入了同编号存档：本页若空闲则立即重载 state 并重渲染，
+  // 避免继续持有旧内存状态、下一次 save() 把另一页的进度整份覆盖（整存整取模型的固有风险）
+  window.addEventListener('storage', function (e) {
+    if (!e || !STATE_KEY || e.key !== STATE_KEY) return;
+    if (session) { pendingResync = true; return; }
+    try {
+      state = pruneGhosts(C.loadState(store, STATE_KEY, null));
+      renderAll();
+      toast('已在另一标签页更新，本页已同步');
+    } catch (err) { }
+  });
+  // today 只在启动时固定一次：挂到跨午夜后回到前台，自动切日期并按新日期重算清单
+  function rolloverIfNeeded() {
+    var now = C.todayStr();
+    if (now === today) return;
+    today = now;
+    var lbl = $('todayLabel'); if (lbl) lbl.textContent = today;
+    if (state) state.plan = null; // 交给 ensurePlan 按新日期重算
+    renderAll();
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') rolloverIfNeeded(); });
+  setInterval(rolloverIfNeeded, 60000);
 
   // ---------- 启动（N-SEC-2）：登录与初始化都在最后一步做，保证上面的绑定语句一定执行过 ----------
   if (/^\d{4}$/.test(user)) startSession(user);
