@@ -2,5 +2,5 @@
    发版/修题库只需把下面的 CET6_VERSION 递增（可用 scripts/_bump_ver.py 一键 +1），
    SW 缓存名、core.js 的缓存穿透参数全部随之刷新。 */
 (function (root) {
-  root.CET6_VERSION = 'cet6-v26';
+  root.CET6_VERSION = 'cet6-v27';
 })(typeof window !== 'undefined' ? window : self);
