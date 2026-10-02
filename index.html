@@ -1154,14 +1154,21 @@ if (location.protocol === 'https:') {
       video.addEventListener('playing', clearTimer);
       video.onerror = function () {
         if (!video.currentSrc && !video.src) return; // 尚未加载任何源时的空触发不打扰
-        // jsDelivr 线路故障时，自动切到 GitHub Pages 备用线路重试一次
         var curUrl = video.currentSrc || video.src || '';
-        if (curUrl.indexOf(LISTEN_CDN) === 0 && !box._retried) {
-          box._retried = true;
-          video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
-          video.src = curUrl.replace(LISTEN_CDN, LISTEN_PAGES);
-          armTimer();
-          return;
+        if (!box._retried) {
+          box._retried = true; // 只自动换一次源，二次仍失败则走原站入口
+          var fb = '';
+          // ① 主源(懒笔记 m3u8)失败 → 回退到自建 cet-audio 的整卷 m4a
+          var m = curUrl.match(/listening\.lazynote\.cn\/cet6\/(\d+)\/index\.m3u8/);
+          if (m) fb = LISTEN_PAGES + '/cet6/' + m[1] + '.m4a';
+          // ② jsDelivr 线路故障 → 切 GitHub Pages 备用线路重试一次
+          else if (curUrl.indexOf(LISTEN_CDN) === 0) fb = curUrl.replace(LISTEN_CDN, LISTEN_PAGES);
+          if (fb) {
+            video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
+            video.src = fb;
+            armTimer();
+            return;
+          }
         }
         showFb();
       };
