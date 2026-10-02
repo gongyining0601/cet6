@@ -1121,7 +1121,7 @@ if (location.protocol === 'https:') {
       '<div class="lp-loading" style="display:none;margin-top:6px;padding:6px 10px;border-radius:8px;background:var(--line);font-size:12.5px;color:var(--muted)">⏳ 正在加载听力音频，请稍候…</div>' +
       '<div class="listen-strip">' + strip +
       '<label class="lp-auto"><input type="checkbox" checked> 篇间连播</label></div>' +
-      '<div class="lp-fallback" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12.5px">🎧 本浏览器无法直接播放该音频（音频站跨域限制），请 ' + fbLink + ' ，听完返回作答。</div>' +
+      '<div class="lp-fallback" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12.5px">🎧 多次尝试仍无法加载音频。<button type="button" class="lp-retry" style="margin:0 6px;padding:2px 10px;border:1px solid var(--warn);border-radius:6px;background:#fff;cursor:pointer">🔄 重试</button>或 ' + fbLink + ' ，听完返回作答。</div>' +
       '<div class="muted" style="font-size:11.5px;margin-top:6px">点「▶ 本篇」或任一篇播放；勾选连播时自动接续下一篇。一直转圈无法播放？请 ' + fbLink + '（新窗口），听完返回作答。</div></div>';
   }
   // 播放策略（2026-10 实测）：音频CDN的CORS只放行懒笔记自家域，hls.js(fetch/XHR)在本站
@@ -1141,43 +1141,58 @@ if (location.protocol === 'https:') {
       box._autoOn = !!auto;
       if (auto) auto.onchange = function () { box._autoOn = auto.checked; };
       var loadTimer = null;
+      var LOADING_TEXT = '⏳ 正在加载听力音频，请稍候…';
+      var RETRY_DELAYS = [2000, 5000, 10000]; // 智能重试：递增退避，3 次都失败才给兜底
       function clearTimer() { if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; } }
-      function showLoading(on) { if (loading) loading.style.display = on ? '' : 'none'; }
-      function showFb() { // 无法播放：常驻原站收听入口，并解除"已加载"标记以便重试
+      function showLoading(on, txt) {
+        if (!loading) return;
+        if (on) loading.textContent = txt || LOADING_TEXT;
+        loading.style.display = on ? '' : 'none';
+      }
+      function showFb() { // 自动重试耗尽：给原站入口 + 手动重试，并解除"已加载"标记以便重试
         clearTimer();
         showLoading(false);
         box._srcSet = false; // 关键修复：加载失败后允许重设 src，而非在坏源上 seek
         if (fallback) fallback.style.display = '';
       }
+      // 智能重试：交替 jsDelivr / Pages 两条线路，2s/5s/10s 递增退避
+      function scheduleRetry() {
+        var n = box._retryCount || 0;
+        if (n >= RETRY_DELAYS.length) { showFb(); return; }
+        box._retryCount = n + 1;
+        var d = RETRY_DELAYS[n];
+        clearTimer();
+        showLoading(true, '⏳ 网络不给力，' + Math.round(d / 1000) + ' 秒后自动重试（第 ' + box._retryCount + '/' + RETRY_DELAYS.length + ' 次）…');
+        loadTimer = setTimeout(function () {
+          var curUrl = video.currentSrc || video.src || '';
+          var nextBase = curUrl.indexOf(LISTEN_PAGES) === 0 ? LISTEN_CDN : LISTEN_PAGES; // 交替线路
+          box._srcSet = true;
+          video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
+          video.src = src.replace(LISTEN_CDN, nextBase);
+          showLoading(true);
+          armTimer();
+        }, d);
+      }
       // 部分浏览器（微信X5/老内核等）对跨域音频既不播也不抛错，一直转圈：
-      // 8秒内没出现有效数据(readyState>=2)即判定播不了，给出原站入口，避免无限等待。
+      // 8秒内没出现有效数据(readyState>=2)即判定卡住，转智能重试，避免无限等待。
       function armTimer() {
         clearTimer();
-        loadTimer = setTimeout(function () { if (video.readyState < 2) showFb(); }, 8000);
+        loadTimer = setTimeout(function () { if (video.readyState < 2) scheduleRetry(); }, 8000);
       }
-      video.addEventListener('loadeddata', function () { clearTimer(); showLoading(false); });
-      video.addEventListener('playing', function () { clearTimer(); showLoading(false); });
-      video.addEventListener('canplay', function () { clearTimer(); showLoading(false); });
+      function onReady() { box._retryCount = 0; clearTimer(); showLoading(false); }
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('playing', onReady);
+      video.addEventListener('canplay', onReady);
+      video.addEventListener('progress', function () { // 缓冲进度百分比，缓解"转圈焦虑"
+        try {
+          if (!video.buffered.length || !video.duration) return;
+          var pct = Math.min(100, Math.round(video.buffered.end(video.buffered.length - 1) / video.duration * 100));
+          if (loading && loading.style.display !== 'none') loading.textContent = '⏳ 正在加载听力音频… 已缓冲 ' + pct + '%';
+        } catch (e) {}
+      });
       video.onerror = function () {
         if (!video.currentSrc && !video.src) return; // 尚未加载任何源时的空触发不打扰
-        var curUrl = video.currentSrc || video.src || '';
-        if (!box._retried) {
-          box._retried = true; // 只自动换一次源，二次仍失败则走原站入口
-          var fb = '';
-          // ① 主源(懒笔记 m3u8)失败 → 回退到自建 cet-audio 的整卷 m4a
-          var m = curUrl.match(/listening\.lazynote\.cn\/cet6\/(\d+)\/index\.m3u8/);
-          if (m) fb = LISTEN_PAGES + '/cet6/' + m[1] + '.m4a';
-          // ② jsDelivr 线路故障 → 切 GitHub Pages 备用线路重试一次
-          else if (curUrl.indexOf(LISTEN_CDN) === 0) fb = curUrl.replace(LISTEN_CDN, LISTEN_PAGES);
-          if (fb) {
-            video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
-            video.src = fb;
-            showLoading(true);
-            armTimer();
-            return;
-          }
-        }
-        showFb();
+        scheduleRetry();
       };
       function markCur(i) {
         Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) { b.classList.remove('cur'); });
@@ -1194,12 +1209,14 @@ if (location.protocol === 'https:') {
         var pc = pieces[i];
         if (!pc) return;
         box._curPc = pc;
+        box._retryCount = 0; // 用户主动点篇：重置重试计数
         if (fallback) fallback.style.display = 'none';
         if (!box._srcSet || video.readyState === 0) {
           // 首次加载，或上次加载失败（_srcSet已被showFb重置）→ 重新设 src
           box._srcSet = true;
           video.onloadedmetadata = function () { seekStart(pc); };
-          video.src = src;
+          // 预加载已探测出可用线路时直接走它，省一次失败等待
+          video.src = box._goodBase ? src.replace(LISTEN_CDN, box._goodBase) : src;
           showLoading(true);
         } else {
           seekStart(pc);
@@ -1215,6 +1232,23 @@ if (location.protocol === 'https:') {
       Array.prototype.forEach.call(box.querySelectorAll('.lp-piece'), function (b) {
         b.onclick = function () { loadPiece(Number(b.getAttribute('data-i'))); };
       });
+      var retryBtn = box.querySelector('.lp-retry');
+      if (retryBtn) retryBtn.onclick = function () { box._retryCount = 0; box._srcSet = false; loadPiece(cur); };
+      // 进入题组即后台预加载整卷音频（HTTP缓存复用，点播放秒开）；顺带探测可用
+      // 线路写入 _goodBase。移动端省流模式下浏览器可自行忽略 preload，无副作用。
+      if (window.Audio) {
+        var pre = new Audio();
+        pre.preload = 'auto';
+        pre._fb = false;
+        pre.onerror = function () {
+          if (pre._fb) return;
+          pre._fb = true;
+          pre.src = src.replace(LISTEN_CDN, LISTEN_PAGES);
+        };
+        pre.addEventListener('loadeddata', function () { box._goodBase = pre._fb ? LISTEN_PAGES : LISTEN_CDN; });
+        pre.src = src;
+        box._preload = pre;
+      }
     });
   }
   function optBtn(q, v, text) {
