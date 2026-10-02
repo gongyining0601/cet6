@@ -1073,7 +1073,15 @@ if (location.protocol === 'https:') {
   }
   // ---------- R5 听力方案A：原生 hls.js 播放器 ----------
   // 数据来自 app/bank/listeningMeta.js（烘焙 CET6_LISTEN_META[srcPaperId] = {src, pieces:[{label,start,end}]}）
-  function listenSrc(pid) { return ((window.CET6_LISTEN_META || {})[pid] || {}).src || ''; }
+  // 音频镜像：懒笔记CDN的CORS只放行其自家域（桌面Chrome/Edge原生HLS也做CORS校验），
+  // 故音频已转码为单文件AAC并镜像到自有仓库，jsDelivr主线路 + GitHub Pages备用线路。
+  var LISTEN_CDN = 'https://cdn.jsdelivr.net/gh/gongyining0601/cet-audio@main';
+  var LISTEN_PAGES = 'https://gongyining0601.github.io/cet-audio';
+  function listenSrc(pid) {
+    var u = ((window.CET6_LISTEN_META || {})[pid] || {}).src || '';
+    var m = u.match(/listening\.lazynote\.cn\/(cet[46])\/(\d+)\/index\.m3u8/);
+    return m ? LISTEN_CDN + '/' + m[1] + '/' + m[2] + '.m4a' : u;
+  }
   function listenPieces(pid) { return ((window.CET6_LISTEN_META || {})[pid] || {}).pieces || null; }
   function listenQRange(label) {
     var m = /(\d+)\s*[–-]\s*(\d+)/.exec(label || '');
@@ -1146,6 +1154,15 @@ if (location.protocol === 'https:') {
       video.addEventListener('playing', clearTimer);
       video.onerror = function () {
         if (!video.currentSrc && !video.src) return; // 尚未加载任何源时的空触发不打扰
+        // jsDelivr 线路故障时，自动切到 GitHub Pages 备用线路重试一次
+        var curUrl = video.currentSrc || video.src || '';
+        if (curUrl.indexOf(LISTEN_CDN) === 0 && !box._retried) {
+          box._retried = true;
+          video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
+          video.src = curUrl.replace(LISTEN_CDN, LISTEN_PAGES);
+          armTimer();
+          return;
+        }
         showFb();
       };
       function markCur(i) {
@@ -1162,6 +1179,7 @@ if (location.protocol === 'https:') {
       function loadPiece(i) {
         var pc = pieces[i];
         if (!pc) return;
+        box._curPc = pc;
         if (fallback) fallback.style.display = 'none';
         if (!box._srcSet) {
           box._srcSet = true; // 同一卷各篇共用一条音频：只在首篇加载，后续仅跳转时间点
