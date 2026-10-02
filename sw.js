@@ -3,15 +3,14 @@
  * 题库 bank/*.js 缓存优先（内容极少变化，二次打开秒开）。
  * 版本号单点化：VERSION 来自 version.js（importScripts），与 index.html 的 core.js?v= 同源，
  * 改 version.js 一处即全端刷新缓存。
- * 缓存节奏（修复弱网 install 全败）：install 只原子预缓存小体积外壳（≈1MB），
+ * 缓存节奏（修复弱网 install 全败）：install 只原子预缓存小体积外壳（≈0.2MB，写作题图
+ * 不预缓存——按需走 bank 缓存策略，用到哪卷缓存哪张），
  * 76 卷题库（≈8.6MB）在 activate 后分批后台预热，单卷失败不拖累安装；
  * 预热完成前做题路径本来就有"缓存未命中→网络→写缓存"的兜底。
  */
 try { importScripts('./version.js'); } catch (e) { }
 var VERSION = self.CET6_VERSION || 'cet6-v21';
-var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js',
-  './bank/img/2015-12-1.jpg', './bank/img/2015-12-2.jpg', './bank/img/2015-12-3.jpg',
-  './bank/img/2021-06-1.jpg', './bank/img/2021-06-2.jpg', './bank/img/2021-06-3.jpg'];
+var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js'];
 /* 卷清单来自 meta.js（顶层 IIFE 挂到 self.CET6_META）：activate 后分批后台预热。
    meta.js 缺失时退化为只缓存外壳（页面会由 index.html 的 meta 完整性检查给出错误提示）。 */
 try { importScripts('./bank/meta.js'); } catch (e) { }
