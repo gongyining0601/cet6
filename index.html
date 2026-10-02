@@ -1075,7 +1075,7 @@ if (location.protocol === 'https:') {
   // 数据来自 app/bank/listeningMeta.js（烘焙 CET6_LISTEN_META[srcPaperId] = {src, pieces:[{label,start,end}]}）
   // 音频镜像：懒笔记CDN的CORS只放行其自家域（桌面Chrome/Edge原生HLS也做CORS校验），
   // 故音频已转码为单文件AAC并镜像到自有仓库，jsDelivr主线路 + GitHub Pages备用线路。
-  var LISTEN_CDN = 'https://cdn.jsdelivr.net/gh/gongyining0601/cet-audio@main';
+  var LISTEN_CDN = 'https://cdn.jsdelivr.net/gh/gongyining0601/cet-audio@v1.0';
   var LISTEN_PAGES = 'https://gongyining0601.github.io/cet-audio';
   function listenSrc(pid) {
     var u = ((window.CET6_LISTEN_META || {})[pid] || {}).src || '';
