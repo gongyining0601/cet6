@@ -47,15 +47,8 @@
   CORE.PLAN_VERSION = 8; // 清单结构版本：低于此版本的旧版 plan 会被 ensurePlan 丢弃重算（v8=听力篇边界改读 listeningMeta 实测分片；v7=主题型日+听力每天保底+听力组按篇对齐）
 
   // ---------- 题库索引 ----------
-  CORE.allQuestions = function (banks) {
-    var out = [];
-    banks.forEach(function (b) {
-      (b.questions || []).forEach(function (q) {
-        out.push({ q: q, paper: b });
-      });
-    });
-    return out;
-  };
+  // （原 CORE.allQuestions 已移除：全仓库零引用。它是"把题库摊平成 [{q,paper}]"的旧版遍历入口，
+  //   按需加载改造后查找统一走 findQ / findPaper / meta 骨架，此函数只剩维护成本。）
   CORE.findQ = function (banks, qid) {
     for (var i = 0; i < banks.length; i++) {
       for (var j = 0; j < banks[i].questions.length; j++) {
@@ -74,10 +67,10 @@
   };
 
   // ---------- 遗忘曲线（自适应 SM-2：间隔随答题表现动态伸缩）----------
-  CORE.nextDue = function (box, dateStr) {
-    var iv = CORE.INTERVALS[Math.min(box, CORE.INTERVALS.length - 1)];
-    return CORE.addDays(dateStr, iv);
-  };
+  // （原 CORE.nextDue 已移除：全仓库零引用。它按固定 INTERVALS 阶梯算下次复习日，
+  //   是 SM-2 改造前的入口；现在统一走 nextIv()——“上次间隔 × ease”自适应伸缩，
+  //   两者并存会让"到期日到底按哪套算"变得含糊。INTERVALS 仍被 recordResult /
+  //   loadState 的旧档迁移使用，故保留。）
   // 自适应间隔：ease 反映该题掌握稳固度（1.3~2.8），间隔 = 上次间隔 × ease
   CORE.nextIv = function (wb) {
     if (wb.iv <= 1) return 2;
@@ -155,19 +148,9 @@
   };
 
   // ---------- 随机（按日期种子可复现）----------
-  CORE.seedRand = function (seed) {
-    var s = 0;
-    for (var i = 0; i < seed.length; i++) { s = (s * 31 + seed.charCodeAt(i)) % 1000003; }
-    return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
-  };
-  CORE.shuffledBy = function (arr, rand) {
-    var a = arr.slice();
-    for (var i = a.length - 1; i > 0; i--) {
-      var j = Math.floor(rand() * (i + 1));
-      var t = a[i]; a[i] = a[j]; a[j] = t;
-    }
-    return a;
-  };
+  // （原 CORE.seedRand / CORE.shuffledBy 已移除：全仓库零引用，index.html 里也
+  //   没有任何选项洗牌调用——四类客观题的 option 顺序始终保持题库原始顺序，
+  //   即"选项位置不随机"。保留一对无人调用的随机工具会让人误以为选项是打乱的。）
 
   // ---------- 今日清单生成（P7 预算制 · 完整优先 · 块间轮换）----------
   /* 规则：
@@ -458,14 +441,23 @@
     }
     return out;
   };
+  /* qid 第 4 段（题型字母）→ 题型。实测题库 3315 道客观题：l=1225 听力 / c=690 选词填空 /
+     m=700 信息匹配 / r=700 仔细阅读，字母与题型严格一一对应。
+     为什么必须显式给出这张表、而不能"认不出就算 reading"：
+       normalizeState 对 state.papers 的 key 不做形状校验（任意 key 都保留），
+       因此导入一份被篡改/串版本的备份即可塞进无意义的 key。旧实现把这些 key
+       静默计入 reading，会凭空虚增阅读正确率（进而抬高高分估分与"最弱题型"判断），
+       同时把"存档里有垃圾数据"这件事彻底藏起来。
+       现改为落到 'unknown' 桶：已知四类题型的统计口径不变，异常数据单独可见。
+       注：UI 侧（accTable）与 estimateScore 都按四类白名单取值，unknown 不会上屏。 */
+  CORE.QID_KIND = { l: 'listening', c: 'cloze', m: 'match', r: 'reading' };
   CORE.accuracyByType = function (state) {
     var by = {};
     Object.keys(state.papers).forEach(function (qid) {
       var st = state.papers[qid];
       if (!st) return; // 脏存档兜底：papers 里值为空则不计入
-      // id 形如 2026-06-1-l-3
-      var parts = qid.split('-');
-      var t = parts[3] === 'l' ? 'listening' : (parts[3] === 'c' ? 'cloze' : (parts[3] === 'm' ? 'match' : 'reading'));
+      // id 形如 2015-06-1-l-36：第 4 段是题型字母
+      var t = CORE.QID_KIND[qid.split('-')[3]] || 'unknown';
       by[t] = by[t] || { seen: 0, right: 0 };
       by[t].seen += st.seen; by[t].right += st.right;
     });
@@ -809,10 +801,13 @@
   };
 
   // ---------- 判题 ----------
-  CORE.judge = function (q, answer) {
-    if (q.type === 'match') return answer === q.answer;
-    return answer === q.answer;
-  };
+  /* 四类客观题（听力 / 选词填空 / 信息匹配 / 仔细阅读）的标准答案实测全部是单个选项字母
+     （3315 题 answer 长度均为 1；匹配题同样是 'A'~'K' 单字母），作答值来自 UI 选项按钮，
+     大小写与题库一致，因此一条等值比较即可覆盖全部题型。
+     历史遗留：这里原本对 match 单开了一个分支，但两个分支的代码完全相同——是重构残留。
+     留着它会让人误以为"匹配题有独立判分逻辑"，一旦将来真按题型分化判分，也很容易只改
+     其中一个分支而漏掉另一个。故合并为一条。 */
+  CORE.judge = function (q, answer) { return answer === q.answer; };
 
   if (typeof module !== 'undefined' && module.exports) { module.exports = CORE; }
   else { root.CET6Core = CORE; }
