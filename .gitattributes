@@ -1,0 +1,23 @@
+# 行尾规则（2026-10-07）
+#
+# 为什么需要这个文件：
+#   两仓 core.autocrlf=true，git checkout 会把工作区文本文件刷成 CRLF。后果有两个：
+#     1) _mirror_v2.py 按 LF 比对，工作区一旦变 CRLF 就会出现"整份文件每一行都改了"
+#        的假 diff，还会把 CRLF 传染给另一仓；
+#     2) git status 会挂着消不掉的 ` M` 假警（其实是 stat 缓存没刷新，git diff 是空的）。
+#   这里把 eol 锁死成 lf，让 checkout 也产出 LF，从根上消除抖动。
+#
+# 加本文件前已核实：所有文本 blob 均为纯 LF、无孤立 CR，
+# 因此不会触发任何重整（git add --renormalize 是空操作）。
+#
+# 注意：gitattributes 里**后面的规则覆盖前面的**，所以通配的 * 必须写在图片之前，
+#       图片声明放在最后才能真正生效。
+
+* text=auto eol=lf
+
+# 图片是二进制，显式声明，不让 text=auto 去猜
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
