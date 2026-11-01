@@ -7,24 +7,17 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="六级打卡">
-<script>
-// CSP（安全加固）：只在 https 线上环境注入；本地 file:// 双击打开不注入，避免浏览器对 file 源误拦。
-// script/style 保留 'unsafe-inline'（本页脚本来就内联），CSP 的价值在于禁 object/基座注入、
-// 限制 iframe 只能嵌白名单听力站、媒体/连接只走 https。
-if (location.protocol === 'https:') {
-  var _csp = document.createElement('meta');
-  _csp.httpEquiv = 'Content-Security-Policy';
-  _csp.content = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https: blob:; connect-src 'self' https:; frame-src https://*.lazynote.cn https://lazynote.cn; worker-src 'self' blob:; object-src 'none'; base-uri 'none'";
-  document.head.appendChild(_csp);
-}
-</script>
+<!-- CSP（安全加固）：静态 meta 形式，对 https 与 file:// 两种协议同时生效。
+     本应用脚本来就内联，故 script-src / style-src 保留 'unsafe-inline'；
+     CSP 的价值在于禁 object / base / form 注入、限制 iframe 与连接来源。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https: blob:; connect-src 'self' https:; frame-src https://*.lazynote.cn https://lazynote.cn; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>CET6 每日打卡 · 真题练习</title>
 <style>
   :root {
-    --bg:#f5f6f8; --card:#fff; --ink:#1c2333; --sub:#6b7280; --line:#e5e7eb;
+    --bg:#f5f6f8; --card:#fff; --ink:#1c2333; --sub:#5b6472; --line:#e5e7eb;
     --brand:#2f5af5; --brand-ink:#2f5af5; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
     --c1:#eef2f7; --c2:#eef2ff; --c3:#dcfce7; --c4:#fef2f2; --c5:#fff3e0; --c6:#fef08a;
     --c7:#fff7e6; --c8:#fdf2f8; --c9:#fef3c7; --c10:#fee2e2; --c11:#e0e7ff; --c12:#eef0f3;
@@ -56,7 +49,7 @@ if (location.protocol === 'https:') {
   header { display:flex; justify-content:space-between; align-items:baseline; padding:6px 2px 12px; }
   header h1 { font-size:19px; }
   header .date { color:var(--sub); font-size:13px; }
-  .streak-chip { display:inline-block; background:var(--c5); color:var(--warn); border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
+  .streak-chip { display:inline-block; background:var(--c5); color:#8a4b06; border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
 
   nav { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); display:flex; z-index:50; }
   nav button { flex:1; padding:11px 0 13px; background:none; border:none; font-size:13px; color:var(--sub); cursor:pointer; }
@@ -336,7 +329,7 @@ if (location.protocol === 'https:') {
 <div class="toast" id="toast"></div>
 
 <script src="version.js"></script>
-<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || '0') + '"><\/script>');</script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v29') + '"><\/script>');</script>
   <!-- 按需加载（架构级）：首屏只带元数据骨架（meta.js 440KB ≈ 全量的 1/20），做题/加练时动态加载对应卷（见 ensurePapers） -->
   <script src="bank/meta.js"></script>
   <script src="bank/listeningMeta.js"></script>
@@ -483,6 +476,7 @@ if (location.protocol === 'https:') {
     mask.id = 'loginMask';
     mask.innerHTML = '<div class="box"><h3>📱 输入你的学习编号</h3>' +
       '<div class="muted">每人一个 4 位数字编号（比如 1001、2026），各自的练习记录分开保存。数据只存在你这台设备的浏览器里，不上传、不联网。</div>' +
+      '<div class="muted" style="margin-top:8px;color:var(--warn);font-size:12px">⚠️ 4 位编号只有 1 万种组合，共用同一设备时请选一个别人没用过的编号（比如自己学号后 4 位），否则可能看到他人的记录。</div>' +
       '<input id="phoneInput" inputmode="numeric" maxlength="4" placeholder="输入 4 位数字编号" style="text-align:center;font-size:20px;letter-spacing:8px">' +
       '<button class="btn" id="loginBtn" style="width:100%">开始学习</button></div>';
     document.body.appendChild(mask);
@@ -540,6 +534,7 @@ if (location.protocol === 'https:') {
   // M-5：存储写满（QuotaExceededError）时不能只在 toast 里飘一下就被后面的成功提示盖掉，
   // 改成"首次失败提示 + 常驻横幅"，并且把成败返回给调用方，让完成提示说实话。
   var saveFailed = false;
+  var essaySaveTimer = null, essayLastSave = 0; // S1：作文保存防抖/兜底
   function showSaveWarn(msg) {
     var b = $('saveWarn');
     if (!b) return;
@@ -952,7 +947,14 @@ if (location.protocol === 'https:') {
         '<div class="sample" id="sampleBox">' + esc(wt.sample) + '</div>' +
         '<div class="sample" id="checkBox"></div>';
       $('essayTa').oninput = function () {
-        state.essays[it.type] = { lastAt: today, text: this.value }; save();
+        state.essays[it.type] = { lastAt: today, text: this.value };
+        // S1：作文保存加 300ms 防抖 + 1s 兜底
+        // · 防抖：停止输入 300ms 后才落盘，避免逐键写存储
+        // · 兜底：持续输入时每 1s 强制落盘一次，防止丢稿
+        var now = Date.now();
+        clearTimeout(essaySaveTimer);
+        if (now - essayLastSave >= 1000) { save(); essayLastSave = now; }
+        else { essaySaveTimer = setTimeout(function () { save(); essayLastSave = Date.now(); }, 300); }
       };
       $('essayDone').onclick = function () { this.disabled = true; recordTime(it); finishItem(it); quizExit(); }; // N-UI-2：点完置灰堵连点
       $('essaySample').onclick = function () { $('sampleBox').classList.toggle('show'); };

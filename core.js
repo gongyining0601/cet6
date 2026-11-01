@@ -508,6 +508,13 @@
     return { version: 1, history: {}, papers: {}, wrongbook: {}, plan: null, essays: {} };
   };
   CORE.saveState = function (storage, state, key) {
+    // S1：history 只保留最近 730 天（约 2 年），超过的删掉——避免存档无限膨胀
+    if (state && state.history && typeof state.history === 'object') {
+      var cutoff = CORE.addDays(CORE.todayStr(), -730);
+      Object.keys(state.history).forEach(function (d) {
+        if (d < cutoff) delete state.history[d];
+      });
+    }
     storage.setItem(key || CORE.STORAGE_KEY, JSON.stringify(state));
   };
 

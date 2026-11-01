@@ -9,7 +9,7 @@
  * 预热完成前做题路径本来就有"缓存未命中→网络→写缓存"的兜底。
  */
 try { importScripts('./version.js'); } catch (e) { }
-var VERSION = self.CET6_VERSION || 'cet6-v21';
+var VERSION = self.CET6_VERSION || 'cet6-v29';
 var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js'];
 /* 卷清单来自 meta.js（顶层 IIFE 挂到 self.CET6_META）：activate 后分批后台预热。
    meta.js 缺失时退化为只缓存外壳（页面会由 index.html 的 meta 完整性检查给出错误提示）。 */
