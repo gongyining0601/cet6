@@ -468,7 +468,7 @@
   CORE.STORAGE_KEY = 'cet6_p1_state_v1';
   // P2-b：最近一次 normalizeState 在高亮恢复上截断掉的处数 { total, pids }（非持久化，仅本次载入有效）
   CORE.hlTruncatedOnLoad = { total: 0, pids: {} };
-  // 多账号：每个手机号一个独立存档，数据保存在各自设备本地
+  // 多账号：每个 4 位学习编号一个独立存档，数据保存在各自设备本地
   CORE.stateKey = function (phone) { return CORE.STORAGE_KEY + '_' + phone; };
   // 坏档隔离：最近一次 loadState 遇到无法解析/结构非法的存档时，原始串备份到的键名（无则为 null）。
   // 调用方可据此提示用户"旧记录没丢，被隔离了"。

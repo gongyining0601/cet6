@@ -329,7 +329,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="version.js"></script>
-<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v29') + '"><\/script>');</script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v30') + '"><\/script>');</script>
   <!-- 按需加载（架构级）：首屏只带元数据骨架（meta.js 440KB ≈ 全量的 1/20），做题/加练时动态加载对应卷（见 ensurePapers） -->
   <script src="bank/meta.js"></script>
   <script src="bank/listeningMeta.js"></script>
@@ -384,7 +384,7 @@
       document.body.insertBefore(d, first);
     })();
   }
-  // ---------- 手机号登录（本地多账号：每号独立存档，数据只存本机）----------
+  // ---------- 学习编号登录（本地多账号：4 位编号各自独立存档，数据只存本机）----------
   var USER_KEY = 'cet6_user';
   var user = storeGet(USER_KEY) || '';
   function maskPhone(ph) { return ph || ''; } // 4 位学习编号，无需脱敏
@@ -1073,16 +1073,26 @@
       };
     }
   }
-  // ---------- R5 听力方案A：原生 hls.js 播放器 ----------
+  // ---------- 听力播放器：原生 <audio> + 单文件 m4a ----------
   // 数据来自 app/bank/listeningMeta.js（烘焙 CET6_LISTEN_META[srcPaperId] = {src, pieces:[{label,start,end}]}）
-  // 音频镜像：懒笔记CDN的CORS只放行其自家域（桌面Chrome/Edge原生HLS也做CORS校验），
-  // 故音频已转码为单文件AAC并镜像到自有仓库，jsDelivr主线路 + GitHub Pages备用线路。
-  var LISTEN_CDN = 'https://cdn.jsdelivr.net/gh/gongyining0601/cet-audio@v1.0';
-  var LISTEN_PAGES = 'https://gongyining0601.github.io/cet-audio';
+  // 原始音频是懒笔记的 HLS 流，其 CORS 只放行自家域，在本页无法跨域加载，
+  // 故已转码为单文件 AAC(m4a) 镜像到自有仓库，由 <audio> 直连播放（不用 m3u8 / hls.js）。
+  // 线路顺序（2026-11-05 实测）：GitHub Pages 可达(206)；cdn.jsdelivr.net 在本机 TLS 握手即被拦，
+  // 连一个无关的 npm 小文件同样返回 000，属下载域名级阻断 → Pages 为主、jsDelivr 为备。
+  var LISTEN_PRIMARY = 'https://gongyining0601.github.io/cet-audio';
+  var LISTEN_FALLBACK = 'https://cdn.jsdelivr.net/gh/gongyining0601/cet-audio@v1.0';
+  // 会话内复用已探测出的可用线路；file:// / 隐私模式下 sessionStorage 可能抛错，读写都兜住
+  function getGoodBase() {
+    try {
+      var v = sessionStorage.getItem('cet6_audio_base');
+      return (v === LISTEN_PRIMARY || v === LISTEN_FALLBACK) ? v : null;
+    } catch (e) { return null; }
+  }
+  function setGoodBase(v) { try { sessionStorage.setItem('cet6_audio_base', v); } catch (e) {} }
   function listenSrc(pid) {
     var u = ((window.CET6_LISTEN_META || {})[pid] || {}).src || '';
     var m = u.match(/listening\.lazynote\.cn\/(cet[46])\/(\d+)\/index\.m3u8/);
-    return m ? LISTEN_CDN + '/' + m[1] + '/' + m[2] + '.m4a' : u;
+    return m ? LISTEN_PRIMARY + '/' + m[1] + '/' + m[2] + '.m4a' : u;
   }
   function listenPieces(pid) { return ((window.CET6_LISTEN_META || {})[pid] || {}).pieces || null; }
   function listenQRange(label) {
@@ -1120,16 +1130,16 @@
     var fbLink = fbLu ? '<a href="' + esc(fbLu) + '" target="_blank" rel="noopener" style="font-weight:700">打开懒笔记原站收听 ↗</a>' : '';
     return '<div class="listen-player" data-pid="' + esc(pid) + '" data-cur="' + cur + '">' +
       '<audio controls playsinline webkit-playsinline preload="metadata" style="width:100%;display:block"></audio>' +
-      '<div class="lp-loading" style="display:none;margin-top:6px;padding:6px 10px;border-radius:8px;background:var(--line);font-size:12.5px;color:var(--muted)">⏳ 正在加载听力音频，请稍候…</div>' +
+      '<div class="lp-loading" style="display:none;margin-top:6px;padding:6px 10px;border-radius:8px;background:var(--line);font-size:12.5px;color:var(--sub)">⏳ 正在加载听力音频，请稍候…</div>' +
       '<div class="listen-strip">' + strip +
       '<label class="lp-auto"><input type="checkbox" checked> 篇间连播</label></div>' +
       '<div class="lp-fallback" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid var(--warn);border-radius:8px;font-size:12.5px">🎧 多次尝试仍无法加载音频。<button type="button" class="lp-retry" style="margin:0 6px;padding:2px 10px;border:1px solid var(--warn);border-radius:6px;background:#fff;cursor:pointer">🔄 重试</button>或 ' + fbLink + ' ，听完返回作答。</div>' +
       '<div class="muted" style="font-size:11.5px;margin-top:6px">点「▶ 本篇」或任一篇播放；勾选连播时自动接续下一篇。一直转圈无法播放？请 ' + fbLink + '（新窗口），听完返回作答。</div></div>';
   }
-  // 播放策略（2026-10 实测）：音频CDN的CORS只放行懒笔记自家域，hls.js(fetch/XHR)在本站
-  // 对所有浏览器都必被拦；而 <video src=m3u8> 走媒体元素加载，不做CORS校验，且主流环境
-  // （Safari/iOS全系、Chrome/Edge桌面142+、Android Chrome147+）均已原生支持HLS。
-  // 故直接原生直连；不支持的浏览器（桌面Firefox/老内核）快速报错或超时 → 显示原站收听入口。
+  // 播放策略：<audio> 直连自有镜像的单文件 m4a。原始 HLS 流因 CORS 只放行懒笔记自家域，
+  // 在本页用 fetch/XHR 或媒体元素跨域加载都会被拦，故不走 m3u8 / hls.js / <video>。
+  // 主线路加载报错、或 8s 内仍无有效数据(readyState<2)，按 2s/5s/10s 退避交替备用线路；
+  // 三次都失败才显示原站收听入口与手动重试。
   function bindListenPlayer(cont) {
     Array.prototype.forEach.call(cont.querySelectorAll('.listen-player'), function (box) {
       var pid = box.getAttribute('data-pid');
@@ -1141,6 +1151,7 @@
       var loading = box.querySelector('.lp-loading');
       var cur = Number(box.getAttribute('data-cur') || 0);
       box._autoOn = !!auto;
+      box._goodBase = getGoodBase(); // 本次会话已探明的可用线路，首次加载即可直接走它
       if (auto) auto.onchange = function () { box._autoOn = auto.checked; };
       var loadTimer = null;
       var LOADING_TEXT = '⏳ 正在加载听力音频，请稍候…';
@@ -1157,7 +1168,7 @@
         box._srcSet = false; // 关键修复：加载失败后允许重设 src，而非在坏源上 seek
         if (fallback) fallback.style.display = '';
       }
-      // 智能重试：交替 jsDelivr / Pages 两条线路，2s/5s/10s 递增退避
+      // 智能重试：主备交替（Pages ↔ jsDelivr），2s/5s/10s 递增退避
       function scheduleRetry() {
         var n = box._retryCount || 0;
         if (n >= RETRY_DELAYS.length) { showFb(); return; }
@@ -1167,10 +1178,10 @@
         showLoading(true, '⏳ 网络不给力，' + Math.round(d / 1000) + ' 秒后自动重试（第 ' + box._retryCount + '/' + RETRY_DELAYS.length + ' 次）…');
         loadTimer = setTimeout(function () {
           var curUrl = video.currentSrc || video.src || '';
-          var nextBase = curUrl.indexOf(LISTEN_PAGES) === 0 ? LISTEN_CDN : LISTEN_PAGES; // 交替线路
+          var nextBase = curUrl.indexOf(LISTEN_FALLBACK) === 0 ? LISTEN_PRIMARY : LISTEN_FALLBACK; // 交替线路
           box._srcSet = true;
           video.onloadedmetadata = function () { if (box._curPc) seekStart(box._curPc); };
-          video.src = src.replace(LISTEN_CDN, nextBase);
+          video.src = src.replace(LISTEN_PRIMARY, nextBase);
           showLoading(true);
           armTimer();
         }, d);
@@ -1181,7 +1192,13 @@
         clearTimer();
         loadTimer = setTimeout(function () { if (video.readyState < 2) scheduleRetry(); }, 8000);
       }
-      function onReady() { box._retryCount = 0; clearTimer(); showLoading(false); }
+      function onReady() {
+        box._retryCount = 0; clearTimer(); showLoading(false);
+        // 实际出声的线路记进会话，后续卷/后续篇不必再赌一次
+        var u = video.currentSrc || video.src || '';
+        if (u.indexOf(LISTEN_PRIMARY) === 0) setGoodBase(LISTEN_PRIMARY);
+        else if (u.indexOf(LISTEN_FALLBACK) === 0) setGoodBase(LISTEN_FALLBACK);
+      }
       video.addEventListener('loadeddata', onReady);
       video.addEventListener('playing', onReady);
       video.addEventListener('canplay', onReady);
@@ -1218,7 +1235,7 @@
           box._srcSet = true;
           video.onloadedmetadata = function () { seekStart(pc); };
           // 预加载已探测出可用线路时直接走它，省一次失败等待
-          video.src = box._goodBase ? src.replace(LISTEN_CDN, box._goodBase) : src;
+          video.src = box._goodBase ? src.replace(LISTEN_PRIMARY, box._goodBase) : src;
           showLoading(true);
         } else {
           seekStart(pc);
@@ -1237,18 +1254,23 @@
       var retryBtn = box.querySelector('.lp-retry');
       if (retryBtn) retryBtn.onclick = function () { box._retryCount = 0; box._srcSet = false; loadPiece(cur); };
       // 进入题组即后台预加载整卷音频（HTTP缓存复用，点播放秒开）；顺带探测可用
-      // 线路写入 _goodBase。移动端省流模式下浏览器可自行忽略 preload，无副作用。
+      // 线路写入 _goodBase 与 sessionStorage。移动端省流模式下浏览器可自行忽略 preload，无副作用。
       if (window.Audio) {
         var pre = new Audio();
         pre.preload = 'auto';
-        pre._fb = false;
+        // 会话内已探明线路时直接从它起步，不再每次进题组都重演一次失败等待
+        var good = getGoodBase();
+        pre._fb = (good === LISTEN_FALLBACK);
         pre.onerror = function () {
           if (pre._fb) return;
           pre._fb = true;
-          pre.src = src.replace(LISTEN_CDN, LISTEN_PAGES);
+          pre.src = src.replace(LISTEN_PRIMARY, LISTEN_FALLBACK);
         };
-        pre.addEventListener('loadeddata', function () { box._goodBase = pre._fb ? LISTEN_PAGES : LISTEN_CDN; });
-        pre.src = src;
+        pre.addEventListener('loadeddata', function () {
+          box._goodBase = pre._fb ? LISTEN_FALLBACK : LISTEN_PRIMARY;
+          setGoodBase(box._goodBase);
+        });
+        pre.src = good ? src.replace(LISTEN_PRIMARY, good) : src;
         box._preload = pre;
       }
     });
@@ -1535,9 +1557,11 @@
       var rest = all.filter(function (id) { return due.indexOf(id) < 0 && state.wrongbook[id]; })
         .sort(function (a, b) { return state.wrongbook[a].due < state.wrongbook[b].due ? -1 : 1; });
       var html2 = '<h3>未到期错题（' + rest.length + '）· 距下次复习由近到远</h3>';
-      if (rest.length) { html2 += rest.map(function (id) { return wrongRow(id, false); }).join(''); bindWrongRows(al, rest); }
+      if (rest.length) html2 += rest.map(function (id) { return wrongRow(id, false); }).join('');
       else html2 += '<div class="muted" style="margin-top:6px">全部错题均在上方到期区</div>';
       al.innerHTML = html2;
+      // 绑定必须在 innerHTML 之后：此时行才真正进入 DOM，否则「重练」按钮点了没反应
+      if (rest.length) bindWrongRows(al, rest);
     }
   }
   function wrongRow(id, isDue) {
@@ -1609,13 +1633,17 @@
     // 按需加载：先确保错题所在卷已加载（排序/分组需要卷与题数据），再开练
     ensurePapers(papersOfQids(ids), function (ok) {
       if (!ok) { toast('题库卷加载失败，请检查网络后重试'); return; }
+      // 卷加载成功 ≠ 题一定存在：meta 与卷正文不同步时先剔掉幽灵 qid，避免后续 TypeError
+      ids = ids.filter(function (id) { return !!C.findQ(BANKS, id); });
+      if (!ids.length) { toast('这些错题暂时找不到对应题目，已跳过'); return; }
       // 做题顺序按（卷从近到远，卷内题号升序）排：同卷同材料相邻，
       // 整组同屏渲染时材料/音频只出现一次；选题本身仍由「智能复习」按薄弱优先决定
       ids = ids.slice().sort(function (a, b) {
         var pa = C.findPaper(BANKS, a), pb = C.findPaper(BANKS, b);
         if (!pa || !pb) return 0;
         if (pa.id !== pb.id) return pa.id < pb.id ? 1 : -1;
-        return C.findQ(BANKS, a).qno - C.findQ(BANKS, b).qno;
+        var qa = C.findQ(BANKS, a), qb = C.findQ(BANKS, b);
+        return (qa ? qa.qno : 0) - (qb ? qb.qno : 0);
       });
       var byType = {};
       ids.forEach(function (id) { var t = C.findQ(BANKS, id).type; (byType[t] = byType[t] || []).push(id); });
@@ -1636,12 +1664,17 @@
     ids = ids.slice(0, 6);
     ensurePapers(papersOfQids(ids), function (ok) {
       if (!ok) { toast('题库卷加载失败，请检查网络后重试'); return; }
+      // 同 startWrongSession：先剔掉卷里实际不存在的 qid，再排序/统计题型
+      ids = ids.filter(function (id) { return !!C.findQ(BANKS, id); });
+      if (!ids.length) { toast('该考点暂无可练题目'); return; }
       ids.sort(function (a, b) {
         var wa = state.wrongbook[a] ? 1 : 0, wb = state.wrongbook[b] ? 1 : 0;
         if (wa !== wb) return wb - wa; // 错题排最前
         var pa = C.findPaper(BANKS, a), pb = C.findPaper(BANKS, b);
+        if (!pa || !pb) return 0;
         if (pa.id !== pb.id) return pa.id < pb.id ? 1 : -1;
-        return C.findQ(BANKS, a).qno - C.findQ(BANKS, b).qno;
+        var qa = C.findQ(BANKS, a), qb = C.findQ(BANKS, b);
+        return (qa ? qa.qno : 0) - (qb ? qb.qno : 0);
       });
       var types = {};
       ids.forEach(function (id) { var t = C.findQ(BANKS, id).type; types[t] = (types[t] || 0) + 1; });
