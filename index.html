@@ -562,6 +562,22 @@
   // 改成"首次失败提示 + 常驻横幅"，并且把成败返回给调用方，让完成提示说实话。
   var saveFailed = false;
   var essaySaveTimer = null, essayLastSave = 0; // S1：作文保存防抖/兜底
+  // S1-补：卸载/切后台时强制落盘待发的写译草稿。
+  // 防抖 300ms 与 1s 兜底都假设"用户还会继续输入"，但真实场景是写完最后一段
+  // 立刻刷新、关标签页或切后台——最后几段还挂在定时器里，一丢就是几百字
+  // （2026-11-05 全量回归 C9/D2 复现：连打 25 段后立即刷新，最多丢 999 字）。
+  // pagehide（刷新/关闭/跳转都触发）+ visibilitychange(hidden)（移动端切后台）
+  // 双保险同步冲刷；重复触发时定时器已清空，天然幂等。
+  function flushEssaySave() {
+    if (!essaySaveTimer) return;
+    clearTimeout(essaySaveTimer);
+    essaySaveTimer = null;
+    try { save(); essayLastSave = Date.now(); } catch (e) { }
+  }
+  document.addEventListener('pagehide', flushEssaySave);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') flushEssaySave();
+  });
   function showSaveWarn(msg) {
     var b = $('saveWarn');
     if (!b) return;
