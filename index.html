@@ -296,7 +296,7 @@
     <div class="card">
       <h3>建议节奏</h3>
       <ul class="tips">
-        <li>每周日导出一次，保存到 <b>D:\CET6\backup\</b></li>
+        <li>导出的文件先落在浏览器的「下载」目录，请移到 <b>D:\CET6\backup\</b> 留好；换设备或清理浏览器数据前导一次即可（今日页会提醒，但不必固定每周）</li>
         <li>换设备：旧设备导出 → 新设备打开本页导入即可无缝衔接</li>
         <li>文件名形如 cet6-backup-日期.json，留好别删</li>
       </ul>
@@ -1802,7 +1802,7 @@
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
     state.lastBackup = today; save();
-    toast('已导出，请妥善保存这份备份文件');
+    toast('已下载到浏览器「下载」目录，请移入 D:\\CET6\\backup\\ 留底');
   };
   // P4 错题导出 CSV：题号/卷/题型/题干/你的答案/正确答案/考点/错次/下次复习/稳固度，Excel 可直接打开
   function csvEsc(v) {
