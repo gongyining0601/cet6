@@ -9,8 +9,8 @@
  * 预热完成前做题路径本来就有"缓存未命中→网络→写缓存"的兜底。
  */
 try { importScripts('./version.js'); } catch (e) { }
-var VERSION = self.CET6_VERSION || 'cet6-v30';
-var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js'];
+var VERSION = self.CET6_VERSION || 'cet6-v31';
+var SHELL = ['./', './index.html', './version.js', './core.js?v=' + encodeURIComponent(VERSION), './manifest.json', './icon-192.png', './icon-512.png', './bank/meta.js', './bank/listeningMeta.js', './sync-config.js', './sync.js'];
 /* 卷清单来自 meta.js（顶层 IIFE 挂到 self.CET6_META）：activate 后分批后台预热。
    meta.js 缺失时退化为只缓存外壳（页面会由 index.html 的 meta 完整性检查给出错误提示）。 */
 try { importScripts('./bank/meta.js'); } catch (e) { }
@@ -55,7 +55,11 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
   var isBank = url.pathname.indexOf('/bank/') >= 0;
-  if (isBank) {
+  // meta.js / listeningMeta.js 是「卷清单 + 听力篇边界」的索引，不是卷正文：
+  // 改走网络优先、离线回退 SHELL 预缓存。这样即使有人忘了递增 version.js，
+  // 线上老用户联网打开也能自愈看到新卷，不会静默停留在旧骨架。
+  var isMetaIndex = /\/bank\/(meta|listeningMeta)\.js$/.test(url.pathname);
+  if (isBank && !isMetaIndex) {
     // 题库：缓存优先，未命中再取网络并写入缓存
     e.respondWith(caches.open(VERSION).then(function (c) {
       return c.match(e.request).then(function (hit) {

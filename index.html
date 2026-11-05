@@ -284,7 +284,7 @@
     <div class="bar"><b>备份与迁移</b></div>
     <div class="card">
       <h3>打卡数据在这里</h3>
-      <p class="tips" style="margin-top:4px">全部记录保存在<strong>本浏览器的本地存储</strong>里，不上传任何服务器。清浏览器数据、换电脑/手机前，请先导出。</p>
+      <p class="tips" style="margin-top:4px">工作副本保存在<strong>本浏览器的本地存储</strong>里。未启用同步时不联网；启用后会经私有端点在多台设备间合并，清浏览器数据也能恢复，详见下方状态卡片。</p>
       <div class="actions">
         <button class="btn" id="exportBtn">导出备份 JSON</button>
         <button class="btn" id="wrongCsvBtn">导出错题本 CSV</button>
@@ -296,10 +296,18 @@
     <div class="card">
       <h3>建议节奏</h3>
       <ul class="tips">
-        <li>导出的文件先落在浏览器的「下载」目录，请移到 <b>D:\CET6\backup\</b> 留好；换设备或清理浏览器数据前导一次即可（今日页会提醒，但不必固定每周）</li>
-        <li>换设备：旧设备导出 → 新设备打开本页导入即可无缝衔接</li>
-        <li>文件名形如 cet6-backup-日期.json，留好别删</li>
+        <li>未启用同步：导出的文件先落在浏览器「下载」目录，请另存到安全位置；换设备或清理浏览器数据前导一次即可</li>
+        <li>已启用同步：记录自动合并到私有端点，仍建议偶尔导出一份留底</li>
+        <li>换设备：端点与命名空间配置相同时自动恢复；未启用同步则走「导出 → 导入」</li>
       </ul>
+    </div>
+    <div class="card">
+      <h3>跨设备同步</h3>
+      <div id="syncStatus" class="tips">读取中…</div>
+      <div class="actions" style="margin-top:8px">
+        <button class="btn ghost" id="syncNowBtn">立即同步</button>
+      </div>
+      <p class="tips" style="margin-top:6px">记录按 4 位学习编号、按项目（cet4 / cet6）分开保存。启用同步后手机与电脑会自动合并，清理浏览器数据也能从私有端点恢复。未配置端点时这里显示「未启用」，记录仍只存本机。</p>
     </div>
     <div class="card">
       <h3>当前题库</h3>
@@ -329,7 +337,10 @@
 <div class="toast" id="toast"></div>
 
 <script src="version.js"></script>
-<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v30') + '"><\/script>');</script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v31') + '"><\/script>');</script>
+<!-- 私有同步层：与 CET4 共用同一份 app/sync.js；sync-config.js 未填端点时整层不激活 -->
+<script src="sync-config.js"></script>
+<script src="sync.js"></script>
   <!-- 按需加载（架构级）：首屏只带元数据骨架（meta.js 440KB ≈ 全量的 1/20），做题/加练时动态加载对应卷（见 ensurePapers） -->
   <script src="bank/meta.js"></script>
   <script src="bank/listeningMeta.js"></script>
@@ -455,6 +466,22 @@
     bindTheme();
     bindUserChip();
     renderAll();
+    // 私有同步：本地先渲染（离线可刷），远端副本回来后字段级合并再重渲染。
+    // 清过浏览器数据或换新设备时，这一步把端点记录回填到空的 localStorage。
+    if (window.CET_SYNC) {
+      CET_SYNC.init({
+        userId: ph,
+        getState: function () { return state; },
+        applyState: function (merged) {
+          state = pruneGhosts(C.normalizeState(merged, null));
+          try { C.saveState(store, state, STATE_KEY); } catch (e) { } // 直接落盘，绕开 save() 避免推送回环
+          renderAll();
+        },
+        onStatus: renderSyncStatus
+      });
+    } else {
+      renderSyncStatus({ state: 'off', message: '未加载同步模块，记录仅存本机', lastAt: 0 });
+    }
     // P2-b：本次载入被截断过高亮就明说一次（toast 非阻塞，不拦任何操作）；
     // 具体是哪一段被截断，会在那一段自己的高亮工具条下面再标一次（见 hlBar）。
     if (hlTruncated.total > 0) {
@@ -475,7 +502,7 @@
     var mask = document.createElement('div');
     mask.id = 'loginMask';
     mask.innerHTML = '<div class="box"><h3>📱 输入你的学习编号</h3>' +
-      '<div class="muted">每人一个 4 位数字编号（比如 1001、2026），各自的练习记录分开保存。数据只存在你这台设备的浏览器里，不上传、不联网。</div>' +
+      '<div class="muted">每人一个 4 位数字编号（比如 1001、2026），各自的练习记录分开保存。未启用同步时记录只存本机；启用后经私有端点在多台设备间合并。</div>' +
       '<div class="muted" style="margin-top:8px;color:var(--warn);font-size:12px">⚠️ 4 位编号只有 1 万种组合，共用同一设备时请选一个别人没用过的编号（比如自己学号后 4 位），否则可能看到他人的记录。</div>' +
       '<input id="phoneInput" inputmode="numeric" maxlength="4" placeholder="输入 4 位数字编号" style="text-align:center;font-size:20px;letter-spacing:8px">' +
       '<button class="btn" id="loginBtn" style="width:100%">开始学习</button></div>';
@@ -553,6 +580,8 @@
     }
     saveFailed = false;
     if (!storeDisabled) { var w = $('saveWarn'); if (w) { w.style.display = 'none'; w.textContent = ''; } } // 写通了就撤掉横幅
+    // 本机写盘成功后节流推送一份权威副本；未配置端点时是空操作
+    if (window.CET_SYNC) { try { CET_SYNC.schedulePush(); } catch (e) { } }
     return true;
   }
   function histToday() {
@@ -1803,6 +1832,28 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
     state.lastBackup = today; save();
     toast('已下载到浏览器「下载」目录，请移入 D:\\CET6\\backup\\ 留底');
+  };
+  // 私有同步状态：未配置端点时明确显示「仅本机」，避免误以为已经云端备份
+  function renderSyncStatus(s) {
+    var el = $('syncStatus'); if (!el) return;
+    var icon = { off: '⚪', syncing: '🔄', ok: '✅', error: '⚠️' }[s.state] || '⚪';
+    var t = s.lastAt ? new Date(s.lastAt).toLocaleTimeString() : "";
+    el.textContent = icon + ' ' + s.message + (t ? '（' + t + '）' : '');
+  }
+  $('syncNowBtn').onclick = function () {
+    if (!window.CET_SYNC) { toast('同步模块未加载'); return; }
+    if (!CET_SYNC.hasEndpoint()) { toast('未启用同步：请先在 sync-config.js 填端点地址'); return; }
+    if (!CET_SYNC.hasToken()) {
+      var t = prompt('输入私有同步口令（只保存在这台设备，不会写进代码或随页面发布）', '');
+      if (t === null) return;
+      t = (t || '').trim();
+      if (!t) { toast('未输入口令，同步保持关闭'); return; }
+      CET_SYNC.setToken(t);
+    }
+    if (!CET_SYNC.enabled()) { toast('同步未就绪，请刷新页面后重试'); return; }
+    CET_SYNC.pushNow().then(function (ok) {
+      toast(ok ? '同步完成' : '同步未完成，本机记录已保存');
+    });
   };
   // P4 错题导出 CSV：题号/卷/题型/题干/你的答案/正确答案/考点/错次/下次复习/稳固度，Excel 可直接打开
   function csvEsc(v) {
