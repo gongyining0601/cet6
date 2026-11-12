@@ -337,7 +337,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="version.js"></script>
-<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v34') + '"><\/script>');</script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v35') + '"><\/script>');</script>
 <!-- 私有同步层：与 CET4 共用同一份 app/sync.js；sync-config.js 未填端点时整层不激活 -->
 <script src="sync-config.js"></script>
 <script src="sync.js"></script>
@@ -1969,7 +1969,7 @@
   // ---------- 按需加载（架构级）：meta 骨架常驻；卷正文按需动态加载 ----------
   var loadedPapers = {};
   var paperInflight = {}; // pid -> 等待回调队列：同一卷并发请求只发一次（去重）
-  var PAPER_LOAD_TIMEOUT = 15000; // 15s 超时：弱网下不再无限挂起"正在加载题库卷…"
+  var PAPER_LOAD_TIMEOUT = 30000; // 弱网兜底：147KB 卷实测 1.6~20s，8s 就放弃会误杀正常加载
   function loadPaperScript(pid, cb, onErr) {
     if (loadedPapers[pid]) { cb && cb(); return; }
     if (paperInflight[pid]) { paperInflight[pid].push({ cb: cb, onErr: onErr }); return; }
@@ -2019,16 +2019,16 @@
       } catch (e) { viaScriptTag(); }
     }
     if (location.protocol !== 'file:' && typeof fetch === 'function') {
-      var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
-      var abortTimer = ctl && setTimeout(function () { ctl.abort(); }, 8000);
-      fetch(url, ctl ? { signal: ctl.signal } : {}).then(function (resp) {
+      // 不再单独 abort：本机到 Pages 的 147KB 卷实测 1.6~20s 波动，
+      // 过早 abort 会立刻回退到 <script src>（该通道在本环境本就挂死），
+      // 把「慢」变成「必失败」。统一交给 PAPER_LOAD_TIMEOUT 兜底。
+      fetch(url).then(function (resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.text();
       }).then(function (code) {
-        clearTimeout(abortTimer);
         if (!code || code.indexOf('CET6_BANKS') < 0) throw new Error('卷脚本内容异常');
         injectCode(code);
-      }).catch(function () { clearTimeout(abortTimer); viaScriptTag(); });
+      }).catch(function () { viaScriptTag(); });
     } else {
       viaScriptTag();
     }
