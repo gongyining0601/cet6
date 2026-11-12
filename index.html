@@ -337,7 +337,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="version.js"></script>
-<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v33') + '"><\/script>');</script>
+<script>document.write('<script src="core.js?v=' + encodeURIComponent(window.CET6_VERSION || 'cet6-v34') + '"><\/script>');</script>
 <!-- 私有同步层：与 CET4 共用同一份 app/sync.js；sync-config.js 未填端点时整层不激活 -->
 <script src="sync-config.js"></script>
 <script src="sync.js"></script>
@@ -1974,25 +1974,64 @@
     if (loadedPapers[pid]) { cb && cb(); return; }
     if (paperInflight[pid]) { paperInflight[pid].push({ cb: cb, onErr: onErr }); return; }
     paperInflight[pid] = [{ cb: cb, onErr: onErr }];
-    var done = false;
+    var done = false, pendingScript = null, timer;
     function settle(ok) {
       if (done) return; done = true;
+      clearTimeout(timer);
+      if (!ok && pendingScript && pendingScript.parentNode) {
+        try { pendingScript.parentNode.removeChild(pendingScript); } catch (e) { }
+      }
       var q = paperInflight[pid]; delete paperInflight[pid];
       (q || []).forEach(function (w) { if (ok) { w.cb && w.cb(); } else { w.onErr && w.onErr(pid); } });
     }
-    var s = document.createElement('script');
-    s.src = 'bank/cet6-' + pid + '.js';
-    var timer = setTimeout(function () {
-      settle(false);
-      try { if (s.parentNode) s.parentNode.removeChild(s); } catch (e) { }
-    }, PAPER_LOAD_TIMEOUT);
-    s.onload = function () {
-      clearTimeout(timer);
-      loadedPapers[pid] = 1; // 即使超时后才到，也标记已注入，防止重复 append 同卷脚本
-      settle(true);
-    };
-    s.onerror = function () { clearTimeout(timer); settle(false); };
-    document.head.appendChild(s);
+    timer = setTimeout(function () { settle(false); }, PAPER_LOAD_TIMEOUT);
+    var url = 'bank/cet6-' + pid + '.js';
+
+    /* 2026-11-12 线上缺陷修复：大卷用 <script src> 动态注入时，在部分
+       网络/CDN 组合下请求会一直挂住，onload / onerror 都不触发，15s 后
+       只能报错退出——写译答题区永远出不来（test_online_p72.js 稳定红）。
+       同源 fetch 取同一文件实测 1.6~5.8s 稳定成功，故 http(s) 下改走
+       "fetch 文本 + 内联 script 执行"（CSP 已允许 'unsafe-inline'，无需
+       unsafe-eval）；file://、老浏览器或 fetch 失败时仍回退原 <script src>，
+       本地测试与 Service Worker 离线路径不受影响。 */
+    function viaScriptTag() {
+      if (done) return;
+      var s = document.createElement('script');
+      pendingScript = s;
+      s.src = url;
+      s.onload = function () {
+        loadedPapers[pid] = 1; // 即使超时后才到，也标记已注入，防止重复 append 同卷脚本
+        settle(true);
+      };
+      s.onerror = function () { settle(false); };
+      document.head.appendChild(s);
+    }
+    function injectCode(code) {
+      try {
+        var s = document.createElement('script');
+        s.textContent = code;
+        document.head.appendChild(s);
+        // inline script 若被 CSP 拦掉不会抛异常，必须回查卷是否真的入列
+        var hit = (window.CET6_BANKS || []).some(function (b) { return b && b.id === pid; });
+        if (!hit) { try { s.parentNode.removeChild(s); } catch (e) { } viaScriptTag(); return; }
+        loadedPapers[pid] = 1;
+        settle(true);
+      } catch (e) { viaScriptTag(); }
+    }
+    if (location.protocol !== 'file:' && typeof fetch === 'function') {
+      var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+      var abortTimer = ctl && setTimeout(function () { ctl.abort(); }, 8000);
+      fetch(url, ctl ? { signal: ctl.signal } : {}).then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.text();
+      }).then(function (code) {
+        clearTimeout(abortTimer);
+        if (!code || code.indexOf('CET6_BANKS') < 0) throw new Error('卷脚本内容异常');
+        injectCode(code);
+      }).catch(function () { clearTimeout(abortTimer); viaScriptTag(); });
+    } else {
+      viaScriptTag();
+    }
   }
   function papersOfQids(qids) {
     var out = {};
