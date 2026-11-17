@@ -50,9 +50,15 @@
   header h1 { font-size:19px; }
   header .date { color:var(--sub); font-size:13px; }
   .streak-chip { display:inline-block; background:var(--c5); color:#8a4b06; border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; margin-left:8px; }
+  /* M-ACC-1：暗色下 chip 是深棕底(--c5:#422006)配暗金字(#8a4b06)，对比度仅 2.14:1（WCAG 要 4.5:1）。
+     改用亮金 #fcd34d（=暗色 --c16），实测约 10:1；浅色 #8a4b06 对 #fff3e0 约 6.2:1 本来达标，不动。 */
+  body.dark .streak-chip { color:#fcd34d; }
 
   nav { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); display:flex; z-index:50; }
   nav button { flex:1; padding:11px 0 13px; background:none; border:none; font-size:13px; color:var(--sub); cursor:pointer; }
+  /* M-ACC-2：viewport-fit=cover 已开启但从未消费 env() 安全区——全面屏手机底部小横条
+     会盖住 nav 文字。给 nav 按钮加安全区兜底（无安全区的设备 env 取 0，行为不变）。 */
+  nav button { padding-bottom: calc(13px + env(safe-area-inset-bottom, 0px)); }
   nav button.on { color:var(--brand-ink); font-weight:700; }
 
   .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; }
