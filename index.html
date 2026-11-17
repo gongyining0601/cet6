@@ -547,6 +547,9 @@
       ph = ph.trim();
       if (!/^\d{4}$/.test(ph)) { alert('编号格式不对（要 4 位数字），没切换'); return; }
       if (!storeSet(USER_KEY, ph)) { alert('这台浏览器不允许保存数据（隐私模式或空间已满），没切换'); return; }
+      // 切换编号 = 切换身份：立即清掉旧编号的内存令牌并停掉在途同步，
+      // 避免同页切换时用 A 的令牌去读写 B 的云端分片（安全修复，与 sync.js 的 tokenKeyOf/detach 配套）
+      if (window.CET_SYNC && CET_SYNC.detach) CET_SYNC.detach();
       if (storeDisabled) { startSession(ph); toast('已切换到 ' + maskPhone(ph) + '（本窗口禁止本地存储，刷新后请重新输入）'); return; } // N-SEC-2
       location.reload();
     };

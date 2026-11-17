@@ -26,7 +26,11 @@
   var DEBOUNCE = Math.max(500, Number(CFG.debounceMs) || 3000);
   var TIMEOUT = Math.max(1000, Number(CFG.timeoutMs) || 8000);
   var DEVICE_KEY = 'cet_sync_device';
-  var TOKEN_KEY = 'cet_sync_token_' + NS; // 按项目隔离：两个项目的圈子口令可以不同
+  // 令牌同时按项目 + 学习编号隔离（安全修复）：
+  //   旧实现只按 NS 存一个令牌，共享设备上 A 输过口令后，B 切到 A 的 4 位编号，
+  //   init() 会直接读回 A 的令牌去读写 A 的云端分片 —— B 无需知道口令。
+  //   现在每个编号存自己的令牌；切换编号必须重新输入该编号的口令。
+  function tokenKeyOf(uid) { return 'cet_sync_token_' + NS + '_' + str(uid); }
 
   var opt = null;
   var userId = '';
@@ -36,6 +40,10 @@
   var inFlight = false;
   var dirty = false;
   var boundLifecycle = false;
+  var retryTimer = null;
+  var retryAttempt = 0;
+  var RETRY_MAX = 6;                 // 最多退避重试 6 次，避免后台永久轮询
+  var RETRY_BASE = Math.max(2000, DEBOUNCE); // 首次重试间隔 ≥2s，指数退避到约 2 分钟
   var status = { state: 'off', message: '未启用同步', lastAt: 0 };
 
   function isObj(o) { return !!o && typeof o === 'object' && !Array.isArray(o); }
@@ -176,6 +184,7 @@
       }
       if (r.status >= 400) throw new Error('服务端返回 ' + r.status + (r.data && r.data.error ? '（' + r.data.error + '）' : ''));
       rev = num(r.data && r.data.rev) || (baseRev + 1);
+      clearRetry(); // 同步成功，复位退避计数与定时器
       setStatus('ok', '已同步');
       return true;
     });
@@ -196,12 +205,35 @@
       return pushMerged(merged, rev, 0);
     }).catch(function (e) {
       setStatus('error', '同步失败：' + (e && e.message ? e.message : e) + '（本机记录已保存，联网后会自动重试）');
+      scheduleRetry(); // 真重试：失败后排退避定时器，兑现"联网后自动重试"的承诺
       return false;
     }).then(function (v) {
       inFlight = false;
       if (dirty) { dirty = false; schedulePush(); }
       return v;
     });
+  }
+
+  // 失败退避重试：2s → 4s → 8s … 上限 RETRY_MAX 次；任一成功即清零。
+  // 用户重新写入（schedulePush）或网络恢复（online）也会提前触发并清零，不必等定时器。
+  function scheduleRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    if (retryAttempt >= RETRY_MAX) {
+      setStatus('error', '同步连续失败 ' + RETRY_MAX + ' 次，已暂停自动重试（本机记录已保存，可到备份页手动重试或改设置）');
+      return;
+    }
+    var wait = RETRY_BASE * Math.pow(2, retryAttempt);
+    retryTimer = setTimeout(function () {
+      retryTimer = null;
+      if (!enabled()) return;
+      retryAttempt++;
+      var p = pushNow();
+      if (p && typeof p.then === 'function') p.then(function (ok) { if (ok) retryAttempt = 0; });
+    }, wait);
+  }
+  function clearRetry() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    retryAttempt = 0;
   }
 
   function schedulePush() {
@@ -234,9 +266,13 @@
     boundLifecycle = true;
     // 切到后台立即推一次；不做 pagehide sendBeacon —— state 可能大于 keepalive 的 64KB 上限
     root.addEventListener('pagehide', function () { pushNow(); });
+    // 网络恢复立即重试一次并清零退避：兑现"联网后会自动重试"承诺（原来只有失败文案没有监听）
+    root.addEventListener('online', function () { if (enabled()) { clearRetry(); pushNow(); } });
     if (root.document) {
       root.document.addEventListener('visibilitychange', function () {
         if (root.document.visibilityState === 'hidden') pushNow();
+        // 从后台回到前台：若有待重试，提前触发一次（用户回来看到的就是最新状态）
+        else if (root.document.visibilityState === 'visible' && retryTimer && enabled()) { clearRetry(); pushNow(); }
       });
     }
   }
@@ -245,21 +281,35 @@
   function hasToken() { return !!TOKEN; }
   function setToken(t) {
     TOKEN = String(t || '');
-    // 口令只落在本机 localStorage，绝不写进随页面发布的静态文件
-    try { if (root.localStorage) root.localStorage.setItem(TOKEN_KEY, TOKEN); } catch (e) { }
+    // 口令只落在本机 localStorage，绝不写进随页面发布的静态文件；
+    // 且按当前学习编号隔离，切换用户后不会串用（安全修复）
+    try { if (root.localStorage) root.localStorage.setItem(tokenKeyOf(userId), TOKEN); } catch (e) { }
     if (enabled()) { setStatus('syncing', '正在连接同步端点…'); flush(); }
     else setStatus('off', '未启用同步（记录仅存本机）');
     return enabled();
+  }
+  // 切换学习编号时清空内存令牌：即使同一页面内切换（不 reload）也不会继承上一身份。
+  // 新编号的口令从其自己的 localStorage 键读取（init 会做），没有则保持未启用。
+  function detach() {
+    TOKEN = '';
+    userId = '';
+    if (timer) { clearTimeout(timer); timer = null; }
+    clearRetry();
+    dirty = false; inFlight = false; rev = 0;
+    setStatus('off', '已切换学习编号，请为该编号重新设置同步口令');
   }
 
   function init(o) {
     opt = o || {};
     if (!BASE) { setStatus('off', '未启用同步（记录仅存本机，请定期导出备份）'); return false; }
-    userId = String(opt.userId || CFG.userId || '').replace(/[^0-9A-Za-z_-]/g, '');
-    if (!userId) { setStatus('error', '缺少学习编号，同步未启用'); return false; }
+    var nextUser = String(opt.userId || CFG.userId || '').replace(/[^0-9A-Za-z_-]/g, '');
+    if (!nextUser) { setStatus('error', '缺少学习编号，同步未启用'); return false; }
+    // 编号变化时先清空旧令牌，再读新编号自己的口令（安全修复：防止跨编号继承身份）
+    if (nextUser !== userId) { TOKEN = ''; rev = 0; if (timer) { clearTimeout(timer); timer = null; } clearRetry(); dirty = false; }
+    userId = nextUser;
     deviceId = getDeviceId();
     if (!TOKEN) {
-      try { TOKEN = String((root.localStorage && root.localStorage.getItem(TOKEN_KEY)) || ''); } catch (e) { }
+      try { TOKEN = String((root.localStorage && root.localStorage.getItem(tokenKeyOf(userId))) || ''); } catch (e) { }
     }
     bindLifecycle();
     // 口令未设置时不打扰启动流程，只把状态挂成「待设置」；用户在备份页点一次即可激活
@@ -275,6 +325,7 @@
     hasEndpoint: hasEndpoint,
     hasToken: hasToken,
     setToken: setToken,
+    detach: detach,
     schedulePush: schedulePush,
     pushNow: pushNow,
     mergeStates: mergeStates,
